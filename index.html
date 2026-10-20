@@ -210,6 +210,11 @@ button { -webkit-tap-highlight-color: transparent; }
   padding: 4px 12px 8px;
 }
 
+/* iPhone Safari/PWAでも hidden を確実に優先する */
+.typing-row[hidden] {
+  display: none !important;
+}
+
 .typing-bubble {
   height: 32px;
   min-width: 54px;

@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase1-gh-v1";
+const CACHE_NAME = "mashiro-line-phase1-gh-v1.1";
 const APP_SHELL = [
   "./",
   "./index.html",
