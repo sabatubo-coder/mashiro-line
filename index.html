@@ -204,15 +204,15 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .typing-row {
   min-height: 46px;
-  display: flex;
+  display: none;
   align-items: center;
   gap: 7px;
   padding: 4px 12px 8px;
 }
 
-/* iPhone Safari/PWAでも hidden を確実に優先する */
-.typing-row[hidden] {
-  display: none !important;
+/* 表示状態は hidden 属性ではなく専用クラスで明示的に制御する */
+.typing-row.is-visible {
+  display: flex;
 }
 
 .typing-bubble {
@@ -384,7 +384,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
     <section id="messageList" class="message-list" aria-live="polite" aria-label="メッセージ履歴"></section>
 
-    <div id="typingRow" class="typing-row" hidden>
+    <div id="typingRow" class="typing-row" aria-hidden="true">
       <div class="avatar avatar--mini avatar--natsuki" aria-hidden="true">夏</div>
       <div class="typing-bubble" aria-label="夏樹が入力中">
         <span></span><span></span><span></span>
@@ -561,7 +561,8 @@ function scrollToBottom(behavior = "smooth") {
 }
 
 function setTyping(visible) {
-  typingRow.hidden = !visible;
+  typingRow.classList.toggle("is-visible", visible);
+  typingRow.setAttribute("aria-hidden", visible ? "false" : "true");
   statusText.textContent = visible ? "入力中…" : "オンライン";
   if (visible) scrollToBottom();
 }
@@ -723,14 +724,26 @@ function resetConversation() {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
+    let reloadingForUpdate = false;
+
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloadingForUpdate) return;
+      reloadingForUpdate = true;
+      window.location.reload();
+    });
+
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch(() => {
-        // HTTPS/localhost 以外では登録できないため、UIはそのまま利用する。
-      });
+      navigator.serviceWorker
+        .register("./sw.js", { updateViaCache: "none" })
+        .then((registration) => registration.update())
+        .catch(() => {
+          // HTTPS/localhost 以外では登録できないため、UIはそのまま利用する。
+        });
     });
   }
 }
 
+setTyping(false);
 renderMessages();
 autosizeInput();
 setTimeout(() => scrollToBottom("auto"), 0);
