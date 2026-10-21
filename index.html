@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.2</title>
+  <title>ましろLINE（仮） Phase 2.3</title>
   <style>
 :root {
   color-scheme: light;
@@ -65,12 +65,21 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .list-header {
-  padding: calc(12px + env(safe-area-inset-top)) 18px 13px;
+  padding: calc(12px + env(safe-area-inset-top)) 14px 13px 18px;
   background: rgba(248,248,250,.94);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
 }
+
+.list-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.list-header-copy { min-width: 0; }
 
 .list-header h1 {
   margin: 0;
@@ -84,6 +93,22 @@ button { -webkit-tap-highlight-color: transparent; }
   font-size: 12px;
   color: var(--subtext);
 }
+
+.settings-entry-button {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(116,119,125,.10);
+  color: #5d6168;
+  font-size: 21px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.settings-entry-button:active { background: rgba(116,119,125,.18); }
 
 .talk-list {
   overflow-y: auto;
@@ -178,6 +203,11 @@ button { -webkit-tap-highlight-color: transparent; }
 .avatar-yuna {
   background: #f0dfea;
   color: #704d63;
+}
+
+.avatar-mashiro {
+  background: #d9e3ea;
+  color: #475b68;
 }
 
 .talk-main { min-width: 0; }
@@ -614,6 +644,219 @@ button { -webkit-tap-highlight-color: transparent; }
   font-weight: 700;
 }
 
+
+
+.settings-screen,
+.profile-screen {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: #f2f3f5;
+}
+
+.settings-topbar {
+  min-height: 58px;
+  padding: calc(7px + env(safe-area-inset-top)) 10px 7px;
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  background: rgba(248,248,250,.96);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  z-index: 5;
+}
+
+.settings-topbar h2 {
+  margin: 0;
+  text-align: center;
+  font-size: 17px;
+}
+
+.settings-scroll,
+.profile-editor-scroll {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 18px 14px calc(30px + env(safe-area-inset-bottom));
+}
+
+.settings-section {
+  margin-bottom: 22px;
+}
+
+.settings-section-title {
+  margin: 0 0 7px 5px;
+  color: #72767d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-card {
+  overflow: hidden;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 0 rgba(0,0,0,.03);
+}
+
+.settings-row {
+  width: 100%;
+  min-height: 68px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  display: grid;
+  grid-template-columns: 46px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-row:last-child { border-bottom: 0; }
+.settings-row:active { background: #f4f5f6; }
+
+.settings-row-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.05);
+}
+
+.settings-row-avatar img,
+.profile-editor-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.settings-row-main { min-width: 0; }
+
+.settings-row-name {
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-row-subtitle {
+  margin-top: 3px;
+  color: #7a7e85;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-row-chevron {
+  color: #a0a3a9;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.profile-editor-card {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.profile-editor-avatar {
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  margin: 5px auto 10px;
+  font-size: 32px;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.06);
+}
+
+.profile-photo-button {
+  display: block;
+  margin: 0 auto 22px;
+  border: 0;
+  background: transparent;
+  color: #1677d2;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.profile-form-card {
+  border-radius: 14px;
+  background: #fff;
+  padding: 4px 14px;
+}
+
+.profile-field {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.profile-field:last-child { border-bottom: 0; }
+
+.profile-field label {
+  display: block;
+  margin-bottom: 6px;
+  color: #6f737a;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.profile-field input {
+  width: 100%;
+  border: 0;
+  outline: none;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.profile-readonly-value {
+  color: #6f737a;
+  font-size: 15px;
+}
+
+.profile-note {
+  margin: 10px 5px 0;
+  color: #81858b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.profile-action-stack {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.profile-action-button {
+  min-height: 46px;
+  border: 0;
+  border-radius: 13px;
+  background: #fff;
+  color: #33363b;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.profile-action-button.primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.profile-action-button.danger {
+  color: var(--danger);
+}
+
 @media (min-width: 780px) {
   .app {
     max-width: 620px;
@@ -627,8 +870,13 @@ button { -webkit-tap-highlight-color: transparent; }
 <div class="app">
   <section id="listScreen" class="screen list-screen">
     <header class="list-header">
-      <h1>トーク</h1>
-      <p>ましろLINE（仮）</p>
+      <div class="list-header-row">
+        <div class="list-header-copy">
+          <h1>トーク</h1>
+          <p>ましろLINE（仮）</p>
+        </div>
+        <button id="settingsButton" class="settings-entry-button" type="button" aria-label="設定">⚙︎</button>
+      </div>
     </header>
     <main id="talkList" class="talk-list" aria-label="トーク一覧"></main>
   </section>
@@ -663,6 +911,49 @@ button { -webkit-tap-highlight-color: transparent; }
       <button id="sendButton" class="send-button" type="submit" disabled>➤</button>
     </form>
   </section>
+
+  <section id="settingsScreen" class="screen settings-screen" hidden>
+    <header class="settings-topbar">
+      <button id="settingsBackButton" class="icon-button" type="button" aria-label="戻る">‹</button>
+      <h2>設定</h2>
+      <span></span>
+    </header>
+    <main id="settingsContent" class="settings-scroll"></main>
+  </section>
+
+  <section id="profileScreen" class="screen profile-screen" hidden>
+    <header class="settings-topbar">
+      <button id="profileBackButton" class="icon-button" type="button" aria-label="戻る">‹</button>
+      <h2 id="profileScreenTitle">プロフィール編集</h2>
+      <span></span>
+    </header>
+    <main class="profile-editor-scroll">
+      <div class="profile-editor-card">
+        <div id="profileEditorAvatar" class="profile-editor-avatar"></div>
+        <button id="profileChooseAvatarButton" class="profile-photo-button" type="button">写真を変更</button>
+        <input id="profileAvatarFileInput" type="file" accept="image/*" hidden />
+
+        <div class="profile-form-card">
+          <div class="profile-field">
+            <label id="profileNameLabel" for="profileNameInput">表示名</label>
+            <input id="profileNameInput" type="text" maxlength="40" autocomplete="off" />
+          </div>
+          <div id="profileOfficialRow" class="profile-field">
+            <label id="profileOfficialLabel">正式名</label>
+            <div id="profileOfficialValue" class="profile-readonly-value"></div>
+          </div>
+        </div>
+
+        <p id="profileNote" class="profile-note">表示名とアイコンはこの端末内だけに保存され、AIの人格設定や長期記憶には影響しません。</p>
+
+        <div class="profile-action-stack">
+          <button id="profileSaveButton" class="profile-action-button primary" type="button">保存</button>
+          <button id="profileResetAvatarButton" class="profile-action-button" type="button">標準アイコンに戻す</button>
+          <button id="profileResetAllButton" class="profile-action-button danger" type="button">初期設定に戻す</button>
+        </div>
+      </div>
+    </main>
+  </section>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -694,23 +985,6 @@ button { -webkit-tap-highlight-color: transparent; }
   </form>
 </dialog>
 
-<dialog id="characterDialog" class="dialog">
-  <form method="dialog" class="dialog-card">
-    <h3 id="characterSettingsTitle">アイコン設定</h3>
-    <div id="settingsAvatar" class="settings-avatar"></div>
-    <div class="settings-caption">選んだ画像はこのiPhone内だけに保存されます。</div>
-    <div id="groupNameSection" class="group-name-section" hidden>
-      <label for="groupNameInput">グループ名</label>
-      <input id="groupNameInput" class="dialog-input" type="text" maxlength="40" placeholder="グループ名" />
-    </div>
-    <input id="avatarFileInput" type="file" accept="image/*" hidden />
-    <div class="dialog-actions">
-      <button id="chooseAvatarButton" class="dialog-button primary full" type="button">写真からアイコンを選ぶ</button>
-      <button id="resetAvatarButton" class="dialog-button full" type="button">標準アイコンに戻す</button>
-      <button class="dialog-button full" value="cancel">閉じる</button>
-    </div>
-  </form>
-</dialog>
 
 <script src="config.js"></script>
 <script>
@@ -726,6 +1000,14 @@ const LEGACY_NATSUKI_PROACTIVE_KEYS = [
 const MAX_LONG_TERM_MEMORIES = 40;
 const MAX_MEMORIES_SENT_TO_AI = 24;
 const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
+
+const SELF_PROFILE = {
+  id: "mashiro",
+  defaultDisplayName: "ましろ",
+  fullName: "柴 冬",
+  initial: "冬",
+  avatarClass: "avatar-mashiro"
+};
 
 const CHARACTERS = {
   natsuki: { id:"natsuki", displayName:"夏樹", fullName:"椎谷 夏樹", initial:"夏", avatarClass:"avatar-natsuki", conversationId:"dm_natsuki", seed:seedNatsuki, proactive:{dailyMax:4,normalMinMs:90*60*1000,normalMaxMs:240*60*1000,recentUserCooldownMs:20*60*1000,recentCharacterCooldownMs:3*60*60*1000}},
@@ -775,12 +1057,16 @@ const appState = {
   proactiveRequestControllers: new Map(),
   proactiveTimer: null,
   proactiveBusy: false,
-  toastTimer: null
+  toastTimer: null,
+  profileTarget: null
 };
 
 const listScreen = document.getElementById("listScreen");
 const chatScreen = document.getElementById("chatScreen");
+const settingsScreen = document.getElementById("settingsScreen");
+const profileScreen = document.getElementById("profileScreen");
 const talkList = document.getElementById("talkList");
+const settingsButton = document.getElementById("settingsButton");
 const backButton = document.getElementById("backButton");
 const avatarButton = document.getElementById("avatarButton");
 const headerAvatar = document.getElementById("headerAvatar");
@@ -796,6 +1082,23 @@ const messageInput = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
 const toast = document.getElementById("toast");
 
+const settingsBackButton = document.getElementById("settingsBackButton");
+const settingsContent = document.getElementById("settingsContent");
+const profileBackButton = document.getElementById("profileBackButton");
+const profileScreenTitle = document.getElementById("profileScreenTitle");
+const profileEditorAvatar = document.getElementById("profileEditorAvatar");
+const profileChooseAvatarButton = document.getElementById("profileChooseAvatarButton");
+const profileAvatarFileInput = document.getElementById("profileAvatarFileInput");
+const profileNameLabel = document.getElementById("profileNameLabel");
+const profileNameInput = document.getElementById("profileNameInput");
+const profileOfficialRow = document.getElementById("profileOfficialRow");
+const profileOfficialLabel = document.getElementById("profileOfficialLabel");
+const profileOfficialValue = document.getElementById("profileOfficialValue");
+const profileNote = document.getElementById("profileNote");
+const profileSaveButton = document.getElementById("profileSaveButton");
+const profileResetAvatarButton = document.getElementById("profileResetAvatarButton");
+const profileResetAllButton = document.getElementById("profileResetAllButton");
+
 const accessDialog = document.getElementById("accessDialog");
 const accessForm = document.getElementById("accessForm");
 const accessCodeInput = document.getElementById("accessCodeInput");
@@ -807,14 +1110,6 @@ const resetMemoryCheckbox = document.getElementById("resetMemoryCheckbox");
 const resetMemoryLabel = document.getElementById("resetMemoryLabel");
 const confirmReset = document.getElementById("confirmReset");
 
-const characterDialog = document.getElementById("characterDialog");
-const characterSettingsTitle = document.getElementById("characterSettingsTitle");
-const settingsAvatar = document.getElementById("settingsAvatar");
-const avatarFileInput = document.getElementById("avatarFileInput");
-const chooseAvatarButton = document.getElementById("chooseAvatarButton");
-const resetAvatarButton = document.getElementById("resetAvatarButton");
-const groupNameSection = document.getElementById("groupNameSection");
-const groupNameInput = document.getElementById("groupNameInput");
 
 function seedNatsuki() {
   const now = new Date();
@@ -836,6 +1131,9 @@ function messageKeyForConversation(conversationId) { return `mashiroLine.phase2.
 function memoryKey(characterId) { return `mashiroLine.phase2.character.${characterId}.memories.v1`; }
 function proactiveKey(characterId) { return `mashiroLine.phase2.character.${characterId}.proactive.v1`; }
 function avatarKey(characterId) { return `mashiroLine.phase2.character.${characterId}.avatar.v1`; }
+function characterDisplayNameKey(characterId) { return `mashiroLine.phase2.character.${characterId}.displayName.v1`; }
+function selfDisplayNameKey() { return "mashiroLine.phase2.self.displayName.v1"; }
+function selfAvatarKey() { return "mashiroLine.phase2.self.avatar.v1"; }
 function groupMemoryKey(groupId) { return `mashiroLine.phase2.group.${groupId}.memories.v1`; }
 function groupProactiveKey(groupId) { return `mashiroLine.phase2.group.${groupId}.proactive.v1`; }
 function groupAvatarKey(groupId) { return `mashiroLine.phase2.group.${groupId}.avatar.v1`; }
@@ -936,6 +1234,12 @@ function groupMemoriesForAPI(groupId){ const m=loadGroupMemories(groupId); saveG
 
 function getAvatarData(characterId){return localStorage.getItem(avatarKey(characterId))||"";}
 function setAvatarData(characterId,dataUrl){ if(dataUrl)localStorage.setItem(avatarKey(characterId),dataUrl); else localStorage.removeItem(avatarKey(characterId)); }
+function getCharacterDisplayName(characterId){const c=characterById(characterId);return localStorage.getItem(characterDisplayNameKey(characterId))||c?.displayName||characterId;}
+function setCharacterDisplayName(characterId,name){const c=characterById(characterId);if(!c)return;const value=String(name||"").trim().slice(0,30);if(!value||value===c.displayName)localStorage.removeItem(characterDisplayNameKey(characterId));else localStorage.setItem(characterDisplayNameKey(characterId),value);}
+function getSelfDisplayName(){return localStorage.getItem(selfDisplayNameKey())||SELF_PROFILE.defaultDisplayName;}
+function setSelfDisplayName(name){const value=String(name||"").trim().slice(0,30);if(!value||value===SELF_PROFILE.defaultDisplayName)localStorage.removeItem(selfDisplayNameKey());else localStorage.setItem(selfDisplayNameKey(),value);}
+function getSelfAvatarData(){return localStorage.getItem(selfAvatarKey())||"";}
+function setSelfAvatarData(dataUrl){if(dataUrl)localStorage.setItem(selfAvatarKey(),dataUrl);else localStorage.removeItem(selfAvatarKey());}
 function getGroupAvatarData(groupId){return localStorage.getItem(groupAvatarKey(groupId))||"";}
 function setGroupAvatarData(groupId,dataUrl){ if(dataUrl)localStorage.setItem(groupAvatarKey(groupId),dataUrl); else localStorage.removeItem(groupAvatarKey(groupId)); }
 function getGroupName(groupId){const g=groupById(groupId);return localStorage.getItem(groupNameKey(groupId))||g.defaultName;}
@@ -944,13 +1248,19 @@ function setGroupName(groupId,name){const g=groupById(groupId);const value=Strin
 function baseAvatarClasses(element){
   if(element.id==="headerAvatar")return ["avatar"];
   if(element.id==="typingAvatar")return ["avatar","mini-avatar"];
-  if(element.id==="settingsAvatar")return ["settings-avatar"];
+  if(element.id==="profileEditorAvatar")return ["profile-editor-avatar"];
+  if(element.classList.contains("settings-row-avatar"))return ["settings-row-avatar"];
   return ["talk-avatar"];
 }
 function applyCharacterAvatar(element, characterId){
   const c=characterById(characterId); const data=getAvatarData(characterId);
   element.className=""; baseAvatarClasses(element).forEach(x=>element.classList.add(x)); element.classList.add(c.avatarClass); element.replaceChildren();
-  if(data){const img=document.createElement("img");img.src=data;img.alt=`${c.displayName}のアイコン`;element.appendChild(img);}else element.textContent=c.initial;
+  if(data){const img=document.createElement("img");img.src=data;img.alt=`${getCharacterDisplayName(characterId)}のアイコン`;element.appendChild(img);}else element.textContent=c.initial;
+}
+function applySelfAvatar(element){
+  const data=getSelfAvatarData();
+  element.className=""; baseAvatarClasses(element).forEach(x=>element.classList.add(x)); element.classList.add(SELF_PROFILE.avatarClass); element.replaceChildren();
+  if(data){const img=document.createElement("img");img.src=data;img.alt=`${getSelfDisplayName()}のアイコン`;element.appendChild(img);}else element.textContent=SELF_PROFILE.initial;
 }
 function applyGroupAvatar(element, groupId){
   const g=groupById(groupId); const data=getGroupAvatarData(groupId);
@@ -964,7 +1274,7 @@ async function makeAvatarDataUrl(file){ const objectUrl=URL.createObjectURL(file
 function formatClock(iso){return new Intl.DateTimeFormat("ja-JP",{hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(iso));}
 function formatListTime(iso){if(!iso)return"";const d=new Date(iso),n=new Date();if(d.getFullYear()===n.getFullYear()&&d.getMonth()===n.getMonth()&&d.getDate()===n.getDate())return formatClock(iso);return new Intl.DateTimeFormat("ja-JP",{month:"numeric",day:"numeric"}).format(d);}
 function dayLabel(iso){const d=new Date(iso),t=new Date(),y=new Date(t);y.setDate(t.getDate()-1);const same=(a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();if(same(d,t))return"今日";if(same(d,y))return"昨日";return new Intl.DateTimeFormat("ja-JP",{month:"numeric",day:"numeric",weekday:"short"}).format(d);}
-function senderDisplayName(senderId){if(senderId==="mashiro")return"あなた";return characterById(senderId)?.displayName||senderId;}
+function senderDisplayName(senderId){if(senderId==="mashiro")return getSelfDisplayName();return characterById(senderId)?getCharacterDisplayName(senderId):senderId;}
 
 function renderTalkList(){
   talkList.replaceChildren();
@@ -975,7 +1285,7 @@ function renderTalkList(){
     const avatar=document.createElement("div");applyConversationAvatar(avatar,conversation);
     const main=document.createElement("div");main.className="talk-main";
     const top=document.createElement("div");top.className="talk-topline";
-    const name=document.createElement("div");name.className="talk-name";name.textContent=conversation.type==="dm"?characterById(conversation.characterId).displayName:getGroupName(conversation.groupId);top.appendChild(name);
+    const name=document.createElement("div");name.className="talk-name";name.textContent=conversation.type==="dm"?getCharacterDisplayName(conversation.characterId):getGroupName(conversation.groupId);top.appendChild(name);
     const preview=document.createElement("div");preview.className="talk-preview";
     if(last){const prefix=conversation.type==="group"?`${senderDisplayName(last.senderId)}: `:"";preview.textContent=prefix+last.text;}else preview.textContent="まだメッセージはありません";
     main.append(top,preview);
@@ -991,14 +1301,14 @@ function openConversation(conversationId,pushHistory=true){
   const conversation=conversationById(conversationId);if(!conversation)return;
   appState.activeConversationId=conversationId;markIncomingSeen(conversationId);
   if(conversation.type==="dm"){
-    const c=characterById(conversation.characterId);chatTitle.textContent=c.displayName;statusText.textContent="オンライン";typingLabel.textContent=`${c.displayName}が入力中…`;applyCharacterAvatar(headerAvatar,c.id);applyCharacterAvatar(typingAvatar,c.id);
+    const c=characterById(conversation.characterId);chatTitle.textContent=getCharacterDisplayName(c.id);statusText.textContent="オンライン";typingLabel.textContent=`${getCharacterDisplayName(c.id)}が入力中…`;applyCharacterAvatar(headerAvatar,c.id);applyCharacterAvatar(typingAvatar,c.id);
   }else{
     const g=groupById(conversation.groupId);chatTitle.textContent=getGroupName(g.id);statusText.textContent="6人";typingLabel.textContent="誰かが入力中…";applyGroupAvatar(headerAvatar,g.id);applyGroupAvatar(typingAvatar,g.id);
   }
-  listScreen.hidden=true;chatScreen.hidden=false;renderMessages();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);
+  listScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;chatScreen.hidden=false;renderMessages();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);
   if(pushHistory)history.pushState({conversationId},"",`#chat=${conversationId}`);
 }
-function showTalkList(pushHistory=true){appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";autosizeInput();chatScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
+function showTalkList(pushHistory=true){appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
 
 function renderMessages(){
   const conversation=activeConversation();if(!conversation)return;const messages=loadConversationMessages(conversation.id);messageList.replaceChildren();let previousDay="";
@@ -1016,6 +1326,128 @@ function renderMessages(){
 }
 function scrollToBottom(behavior="smooth"){requestAnimationFrame(()=>messageList.scrollTo({top:messageList.scrollHeight,behavior}));}
 function showToast(text,duration=3200){clearTimeout(appState.toastTimer);toast.textContent=text;toast.classList.add("visible");appState.toastTimer=setTimeout(()=>toast.classList.remove("visible"),duration);}
+
+function createSettingsRow({type,id,name,subtitle}){
+  const row=document.createElement("button");row.type="button";row.className="settings-row";
+  const avatar=document.createElement("div");avatar.className="settings-row-avatar";
+  if(type==="self")applySelfAvatar(avatar);else if(type==="character")applyCharacterAvatar(avatar,id);else applyGroupAvatar(avatar,id);
+  const main=document.createElement("div");main.className="settings-row-main";
+  const nameEl=document.createElement("div");nameEl.className="settings-row-name";nameEl.textContent=name;
+  const sub=document.createElement("div");sub.className="settings-row-subtitle";sub.textContent=subtitle;
+  main.append(nameEl,sub);
+  const chevron=document.createElement("div");chevron.className="settings-row-chevron";chevron.textContent="›";
+  row.append(avatar,main,chevron);
+  row.addEventListener("click",()=>openProfileEditor(type,id,true));
+  return row;
+}
+
+function renderSettingsScreen(){
+  settingsContent.replaceChildren();
+  const addSection=(title,rows)=>{
+    const section=document.createElement("section");section.className="settings-section";
+    const heading=document.createElement("h3");heading.className="settings-section-title";heading.textContent=title;
+    const card=document.createElement("div");card.className="settings-card";rows.forEach(row=>card.appendChild(row));
+    section.append(heading,card);settingsContent.appendChild(section);
+  };
+
+  addSection("自分のプロフィール",[
+    createSettingsRow({type:"self",id:"mashiro",name:getSelfDisplayName(),subtitle:SELF_PROFILE.fullName})
+  ]);
+
+  addSection("キャラクター",Object.keys(CHARACTERS).map(id=>{
+    const c=characterById(id);
+    return createSettingsRow({type:"character",id,name:getCharacterDisplayName(id),subtitle:c.fullName});
+  }));
+
+  addSection("グループ",Object.keys(GROUPS).map(id=>{
+    const g=groupById(id);
+    return createSettingsRow({type:"group",id,name:getGroupName(id),subtitle:`${g.participants.length}人`});
+  }));
+}
+
+function showSettingsScreen(pushHistory=true){
+  appState.activeConversationId=null;appState.isReplying=false;setTyping(false);
+  listScreen.hidden=true;chatScreen.hidden=true;profileScreen.hidden=true;settingsScreen.hidden=false;
+  renderSettingsScreen();
+  if(pushHistory)history.pushState({settings:true},"","#settings");
+}
+
+function profileTargetData(){
+  const target=appState.profileTarget;if(!target)return null;
+  if(target.type==="self")return {type:"self",id:"mashiro",defaultName:SELF_PROFILE.defaultDisplayName,fullName:SELF_PROFILE.fullName};
+  if(target.type==="character"){
+    const c=characterById(target.id);if(!c)return null;
+    return {type:"character",id:c.id,defaultName:c.displayName,fullName:c.fullName};
+  }
+  const g=groupById(target.id);if(!g)return null;
+  return {type:"group",id:g.id,defaultName:g.defaultName,fullName:`参加者 ${g.participants.length}人`};
+}
+
+function currentProfileDisplayName(data){
+  if(data.type==="self")return getSelfDisplayName();
+  if(data.type==="character")return getCharacterDisplayName(data.id);
+  return getGroupName(data.id);
+}
+
+function applyProfileTargetAvatar(data){
+  if(data.type==="self")applySelfAvatar(profileEditorAvatar);
+  else if(data.type==="character")applyCharacterAvatar(profileEditorAvatar,data.id);
+  else applyGroupAvatar(profileEditorAvatar,data.id);
+}
+
+function renderProfileEditor(){
+  const data=profileTargetData();if(!data)return;
+  profileScreenTitle.textContent=data.type==="group"?"グループ設定":"プロフィール編集";
+  profileNameLabel.textContent=data.type==="group"?"グループ名":"表示名";
+  profileNameInput.value=currentProfileDisplayName(data);
+  profileOfficialRow.hidden=false;
+  profileOfficialLabel.textContent=data.type==="group"?"情報":"正式名";
+  profileOfficialValue.textContent=data.fullName;
+  profileNote.textContent=data.type==="group"
+    ?"グループ名とアイコンはこの端末内だけに保存され、会話履歴・共有記憶・AI設定には影響しません。"
+    :"表示名とアイコンはこの端末内だけに保存され、AIの正式名・人格設定・長期記憶には影響しません。";
+  applyProfileTargetAvatar(data);
+}
+
+function openProfileEditor(type,id,pushHistory=true){
+  appState.profileTarget={type,id};
+  listScreen.hidden=true;chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=false;
+  renderProfileEditor();
+  if(pushHistory)history.pushState({profile:{type,id}},"",`#profile=${type}:${id}`);
+}
+
+function saveProfileTarget(){
+  const data=profileTargetData();if(!data)return;
+  const value=String(profileNameInput.value||"").trim();
+  if(!value){showToast(data.type==="group"?"グループ名を入力してください":"表示名を入力してください");return;}
+  if(data.type==="self")setSelfDisplayName(value);
+  else if(data.type==="character")setCharacterDisplayName(data.id,value);
+  else setGroupName(data.id,value);
+  profileNameInput.value=currentProfileDisplayName(data);
+  renderProfileEditor();renderTalkList();
+  if(!chatScreen.hidden&&activeConversation())openConversation(activeConversation().id,false);
+  showToast("保存しました");
+}
+
+function setProfileAvatar(dataUrl){
+  const data=profileTargetData();if(!data)return;
+  if(data.type==="self")setSelfAvatarData(dataUrl);
+  else if(data.type==="character")setAvatarData(data.id,dataUrl);
+  else setGroupAvatarData(data.id,dataUrl);
+  applyProfileTargetAvatar(data);renderSettingsScreen();renderTalkList();
+}
+
+function resetProfileAll(){
+  const data=profileTargetData();if(!data)return;
+  if(data.type==="self"){
+    localStorage.removeItem(selfDisplayNameKey());setSelfAvatarData("");
+  }else if(data.type==="character"){
+    localStorage.removeItem(characterDisplayNameKey(data.id));setAvatarData(data.id,"");
+  }else{
+    localStorage.removeItem(groupNameKey(data.id));setGroupAvatarData(data.id,"");
+  }
+  renderProfileEditor();renderSettingsScreen();renderTalkList();showToast("初期設定に戻しました");
+}
 
 function setTyping(visible,speakerId=null){
   const conversation=activeConversation();if(!conversation){typingRow.classList.remove("visible");return;}
@@ -1103,20 +1535,36 @@ function startProactiveScheduler(){clearInterval(appState.proactiveTimer);setTim
 
 async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
 
-function showConversationSettings(){const conversation=activeConversation();if(!conversation)return;groupNameSection.hidden=conversation.type!=="group";if(conversation.type==="dm"){const c=characterById(conversation.characterId);characterSettingsTitle.textContent=`${c.displayName}のアイコン`;applyCharacterAvatar(settingsAvatar,c.id);}else{const g=groupById(conversation.groupId);characterSettingsTitle.textContent="グループ設定";applyGroupAvatar(settingsAvatar,g.id);groupNameInput.value=getGroupName(g.id);}characterDialog.showModal();}
-
 composer.addEventListener("submit",e=>{e.preventDefault();sendUserMessage();});
 messageInput.addEventListener("input",autosizeInput);messageInput.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();composer.requestSubmit();}});
 backButton.addEventListener("click",()=>history.back());
-resetButton.addEventListener("click",()=>{const conversation=activeConversation();if(!conversation)return;if(conversation.type==="dm"){const c=characterById(conversation.characterId);resetTitle.textContent=`${c.displayName}とのトークを初期化`;resetMemoryLabel.textContent="このキャラクターの長期記憶も削除する";}else{resetTitle.textContent="グループトークを初期化";resetMemoryLabel.textContent="このグループの共有記憶も削除する";}resetDialog.showModal();});
+resetButton.addEventListener("click",()=>{const conversation=activeConversation();if(!conversation)return;if(conversation.type==="dm"){const c=characterById(conversation.characterId);resetTitle.textContent=`${getCharacterDisplayName(c.id)}とのトークを初期化`;resetMemoryLabel.textContent="このキャラクターの長期記憶も削除する";}else{resetTitle.textContent="グループトークを初期化";resetMemoryLabel.textContent="このグループの共有記憶も削除する";}resetDialog.showModal();});
 confirmReset.addEventListener("click",()=>resetActiveConversation(resetMemoryCheckbox.checked));
-avatarButton.addEventListener("click",showConversationSettings);
-chooseAvatarButton.addEventListener("click",()=>avatarFileInput.click());
-avatarFileInput.addEventListener("change",async()=>{const conversation=activeConversation(),file=avatarFileInput.files?.[0];avatarFileInput.value="";if(!conversation||!file)return;try{const data=await makeAvatarDataUrl(file);if(conversation.type==="dm")setAvatarData(conversation.characterId,data);else setGroupAvatarData(conversation.groupId,data);showConversationSettingsRefresh();showToast("アイコンを変更しました");}catch{showToast("画像を読み込めませんでした");}});
-function showConversationSettingsRefresh(){const conversation=activeConversation();if(!conversation)return;applyConversationAvatar(settingsAvatar,conversation);applyConversationAvatar(headerAvatar,conversation);renderTalkList();renderMessages();}
-resetAvatarButton.addEventListener("click",()=>{const conversation=activeConversation();if(!conversation)return;if(conversation.type==="dm")setAvatarData(conversation.characterId,"");else setGroupAvatarData(conversation.groupId,"");showConversationSettingsRefresh();showToast("標準アイコンに戻しました");});
-groupNameInput.addEventListener("change",()=>{const conversation=activeConversation();if(conversation?.type!=="group")return;setGroupName(conversation.groupId,groupNameInput.value);groupNameInput.value=getGroupName(conversation.groupId);chatTitle.textContent=getGroupName(conversation.groupId);renderTalkList();showToast("グループ名を保存しました");});
-window.addEventListener("popstate",e=>{const conversationId=e.state?.conversationId;if(conversationId&&conversationById(conversationId))openConversation(conversationId,false);else showTalkList(false);});
+avatarButton.addEventListener("click",()=>{
+  const conversation=activeConversation();if(!conversation)return;
+  if(conversation.type==="dm")openProfileEditor("character",conversation.characterId,true);
+  else openProfileEditor("group",conversation.groupId,true);
+});
+settingsButton.addEventListener("click",()=>showSettingsScreen(true));
+settingsBackButton.addEventListener("click",()=>history.back());
+profileBackButton.addEventListener("click",()=>history.back());
+profileChooseAvatarButton.addEventListener("click",()=>profileAvatarFileInput.click());
+profileAvatarFileInput.addEventListener("change",async()=>{
+  const file=profileAvatarFileInput.files?.[0];profileAvatarFileInput.value="";if(!file)return;
+  try{const data=await makeAvatarDataUrl(file);setProfileAvatar(data);showToast("アイコンを変更しました");}
+  catch{showToast("画像を読み込めませんでした");}
+});
+profileSaveButton.addEventListener("click",saveProfileTarget);
+profileNameInput.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.isComposing){e.preventDefault();saveProfileTarget();}});
+profileResetAvatarButton.addEventListener("click",()=>{setProfileAvatar("");showToast("標準アイコンに戻しました");});
+profileResetAllButton.addEventListener("click",resetProfileAll);
+window.addEventListener("popstate",e=>{
+  const state=e.state||{};
+  if(state.conversationId&&conversationById(state.conversationId))openConversation(state.conversationId,false);
+  else if(state.settings)showSettingsScreen(false);
+  else if(state.profile?.type)openProfileEditor(state.profile.type,state.profile.id,false);
+  else showTalkList(false);
+});
 
 function registerServiceWorker(){if(!("serviceWorker" in navigator))return;let reloading=false;navigator.serviceWorker.addEventListener("controllerchange",()=>{if(reloading)return;reloading=true;location.reload();});window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(r=>r.update()).catch(()=>{}));}
 
