@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase1-7-1-proactive-first-test-fix";
+const CACHE_NAME = "mashiro-line-phase1-7-2-proactive-state-reset";
 const ASSETS = [
   "./",
   "./index.html",
