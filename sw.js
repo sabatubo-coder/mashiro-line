@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase2-3-profile-display-v1";
+const CACHE_NAME = "mashiro-line-phase2-4-notifications-v1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -21,6 +21,57 @@ self.addEventListener("activate", (event) => {
     )
   );
   self.clients.claim();
+});
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { title: "ましろLINE", body: event.data ? event.data.text() : "新しいメッセージがあります" };
+  }
+
+  const title = String(data.title || "ましろLINE");
+  const options = {
+    body: String(data.body || "新しいメッセージがあります"),
+    icon: "./icon-192.png",
+    badge: "./icon-192.png",
+    tag: data.conversationId ? `mashiroline-${data.conversationId}` : "mashiroline",
+    renotify: true,
+    data: {
+      conversationId: String(data.conversationId || ""),
+      eventIds: Array.isArray(data.eventIds) ? data.eventIds : []
+    }
+  };
+
+  const promises = [self.registration.showNotification(title, options)];
+  const badgeCount = Number(data.badgeCount || 0);
+  if (self.navigator && "setAppBadge" in self.navigator && badgeCount > 0) {
+    promises.push(self.navigator.setAppBadge(badgeCount));
+  }
+
+  event.waitUntil(Promise.all(promises));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const conversationId = String(event.notification?.data?.conversationId || "");
+
+  event.waitUntil((async () => {
+    const windows = await clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of windows) {
+      if ("focus" in client) {
+        await client.focus();
+        if (conversationId) client.postMessage({ type: "open-conversation", conversationId });
+        return;
+      }
+    }
+
+    const target = conversationId
+      ? `./?push=1#chat=${encodeURIComponent(conversationId)}`
+      : "./?push=1";
+    if (clients.openWindow) await clients.openWindow(target);
+  })());
 });
 
 self.addEventListener("fetch", (event) => {

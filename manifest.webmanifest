@@ -1,7 +1,7 @@
 {
   "name": "ましろLINE（仮）",
   "short_name": "ましろLINE",
-  "description": "『ましろと夏樹の物語』のトーク・プロフィール表示設定に対応したPhase 2.3 PWA",
+  "description": "『ましろと夏樹の物語』のキャラクターと個別・グループで会話し、Web Push通知も受け取れるPhase 2.4 PWA",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -21,5 +21,6 @@
       "type": "image/png",
       "purpose": "any"
     }
-  ]
+  ],
+  "id": "./"
 }
