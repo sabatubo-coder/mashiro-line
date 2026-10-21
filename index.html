@@ -802,11 +802,12 @@ async function callNatsukiAI(accessCode, apiEndpoint) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-App-Access-Code": accessCode
+        "X-App-Code": accessCode
       },
       body: JSON.stringify({
         messages: recentHistoryForAPI(),
         currentTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
+        localTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       }),
       signal: currentRequestController.signal,
