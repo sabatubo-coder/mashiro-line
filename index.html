@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.0</title>
+  <title>ましろLINE（仮） Phase 2.1</title>
   <style>
 :root {
   color-scheme: light;
@@ -148,6 +148,36 @@ button { -webkit-tap-highlight-color: transparent; }
 .avatar-shiki {
   background: #d9d1ef;
   color: #51456d;
+}
+
+.avatar-ichi {
+  background: #d9eef5;
+  color: #315e6e;
+}
+
+.avatar-bunji {
+  background: #efd8b7;
+  color: #694b25;
+}
+
+.avatar-sosuke {
+  background: #d7dde5;
+  color: #3e4855;
+}
+
+.avatar-chiaki {
+  background: #d9e8d2;
+  color: #405a39;
+}
+
+.avatar-saku {
+  background: #e3d8cf;
+  color: #5c493d;
+}
+
+.avatar-yuna {
+  background: #f0dfea;
+  color: #704d63;
 }
 
 .talk-main { min-width: 0; }
@@ -707,12 +737,120 @@ const CHARACTERS = {
       recentUserCooldownMs: 30 * 60 * 1000,
       recentCharacterCooldownMs: 4 * 60 * 60 * 1000
     }
+  },
+
+  ichi: {
+    id: "ichi",
+    displayName: "イチ",
+    fullName: "天野 一",
+    initial: "一",
+    avatarClass: "avatar-ichi",
+    conversationId: "dm_ichi",
+    seed: () => [],
+    proactive: {
+      dailyMax: 4,
+      normalMinMs: 90 * 60 * 1000,
+      normalMaxMs: 240 * 60 * 1000,
+      recentUserCooldownMs: 20 * 60 * 1000,
+      recentCharacterCooldownMs: 3 * 60 * 60 * 1000
+    }
+  },
+
+  bunji: {
+    id: "bunji",
+    displayName: "ブンジ",
+    fullName: "日向 文司",
+    initial: "文",
+    avatarClass: "avatar-bunji",
+    conversationId: "dm_bunji",
+    seed: () => [],
+    proactive: {
+      dailyMax: 3,
+      normalMinMs: 150 * 60 * 1000,
+      normalMaxMs: 360 * 60 * 1000,
+      recentUserCooldownMs: 30 * 60 * 1000,
+      recentCharacterCooldownMs: 4 * 60 * 60 * 1000
+    }
+  },
+
+  sosuke: {
+    id: "sosuke",
+    displayName: "ソウスケ",
+    fullName: "京終 蒼介",
+    initial: "蒼",
+    avatarClass: "avatar-sosuke",
+    conversationId: "dm_sosuke",
+    seed: () => [],
+    proactive: {
+      dailyMax: 2,
+      normalMinMs: 240 * 60 * 1000,
+      normalMaxMs: 480 * 60 * 1000,
+      recentUserCooldownMs: 45 * 60 * 1000,
+      recentCharacterCooldownMs: 6 * 60 * 60 * 1000
+    }
+  },
+
+  chiaki: {
+    id: "chiaki",
+    displayName: "千秋",
+    fullName: "柴 千秋",
+    initial: "千",
+    avatarClass: "avatar-chiaki",
+    conversationId: "dm_chiaki",
+    seed: () => [],
+    proactive: {
+      dailyMax: 3,
+      normalMinMs: 120 * 60 * 1000,
+      normalMaxMs: 300 * 60 * 1000,
+      recentUserCooldownMs: 20 * 60 * 1000,
+      recentCharacterCooldownMs: 3 * 60 * 60 * 1000
+    }
+  },
+
+  saku: {
+    id: "saku",
+    displayName: "朔",
+    fullName: "高木 朔",
+    initial: "朔",
+    avatarClass: "avatar-saku",
+    conversationId: "dm_saku",
+    seed: () => [],
+    proactive: {
+      dailyMax: 2,
+      normalMinMs: 240 * 60 * 1000,
+      normalMaxMs: 480 * 60 * 1000,
+      recentUserCooldownMs: 45 * 60 * 1000,
+      recentCharacterCooldownMs: 6 * 60 * 60 * 1000
+    }
+  },
+
+  yuna: {
+    id: "yuna",
+    displayName: "ユナ",
+    fullName: "汐入 ユナ",
+    initial: "ユ",
+    avatarClass: "avatar-yuna",
+    conversationId: "dm_yuna",
+    seed: () => [],
+    proactive: {
+      dailyMax: 4,
+      normalMinMs: 120 * 60 * 1000,
+      normalMaxMs: 300 * 60 * 1000,
+      recentUserCooldownMs: 20 * 60 * 1000,
+      recentCharacterCooldownMs: 3 * 60 * 60 * 1000
+    }
   }
 };
 
 const CONVERSATIONS = [
   { id: "dm_natsuki", type: "dm", characterId: "natsuki", participants: ["mashiro", "natsuki"] },
-  { id: "dm_shiki", type: "dm", characterId: "shiki", participants: ["mashiro", "shiki"] }
+  { id: "dm_shiki", type: "dm", characterId: "shiki", participants: ["mashiro", "shiki"] },
+  { id: "dm_ichi", type: "dm", characterId: "ichi", participants: ["mashiro", "ichi"] },
+  { id: "dm_bunji", type: "dm", characterId: "bunji", participants: ["mashiro", "bunji"] },
+  { id: "dm_sosuke", type: "dm", characterId: "sosuke", participants: ["mashiro", "sosuke"] },
+  { id: "dm_chiaki", type: "dm", characterId: "chiaki", participants: ["mashiro", "chiaki"] },
+  { id: "dm_saku", type: "dm", characterId: "saku", participants: ["mashiro", "saku"] },
+  { id: "dm_yuna", type: "dm", characterId: "yuna", participants: ["mashiro", "yuna"] }
 ];
 
 const appState = {
