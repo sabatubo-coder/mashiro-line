@@ -417,7 +417,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .access-input:focus { border-color: rgba(77, 143, 91, .55); }
 
 </style>
-  <title>ましろLINE（仮） Phase 1.6 長期記憶</title>
+  <title>ましろLINE（仮） Phase 1.7 自発メッセージ</title>
 </head>
 <body>
   <main class="app-shell" aria-label="夏樹とのトーク">
@@ -500,6 +500,16 @@ const BACKEND_URL_KEY = "mashiroLine.phase1_5.backendUrl.v1";
 const MEMORY_STORAGE_KEY = "mashiroLine.phase1_6.natsuki.memories.v1";
 const MAX_LONG_TERM_MEMORIES = 40;
 const MAX_MEMORIES_SENT_TO_AI = 24;
+const PROACTIVE_STATE_KEY = "mashiroLine.phase1_7.natsuki.proactive.v1";
+const PROACTIVE_DAILY_MAX = 4;
+const PROACTIVE_FIRST_MIN_MS = 2 * 60 * 1000;
+const PROACTIVE_FIRST_MAX_MS = 5 * 60 * 1000;
+const PROACTIVE_NORMAL_MIN_MS = 90 * 60 * 1000;
+const PROACTIVE_NORMAL_MAX_MS = 240 * 60 * 1000;
+const PROACTIVE_RETRY_MIN_MS = 12 * 60 * 1000;
+const PROACTIVE_RETRY_MAX_MS = 25 * 60 * 1000;
+const PROACTIVE_RECENT_USER_COOLDOWN_MS = 20 * 60 * 1000;
+const PROACTIVE_RECENT_NATSUKI_COOLDOWN_MS = 3 * 60 * 60 * 1000;
 const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const messageList = document.getElementById("messageList");
@@ -526,6 +536,9 @@ let messages = loadMessages();
 let longTermMemories = loadLongTermMemories();
 let isReplying = false;
 let currentRequestController = null;
+let proactiveRequestController = null;
+let proactiveCheckTimer = null;
+let proactiveState = loadProactiveState();
 let toastTimer = null;
 
 function makeId() {
@@ -700,6 +713,341 @@ function memoriesForAPI() {
       updatedAt: memory.updatedAt,
       expiresAt: memory.expiresAt
     }));
+}
+
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function proactiveDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+}
+
+function loadProactiveState() {
+  const now = Date.now();
+
+  try {
+    const raw = localStorage.getItem(PROACTIVE_STATE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        const todayKey = proactiveDateKey();
+        if (parsed.dailyDate !== todayKey) {
+          parsed.dailyDate = todayKey;
+          parsed.dailyCount = 0;
+        }
+
+        if (!Number.isFinite(Number(parsed.nextDueAt))) {
+          parsed.nextDueAt = now + randomBetween(PROACTIVE_FIRST_MIN_MS, PROACTIVE_FIRST_MAX_MS);
+        }
+
+        return {
+          nextDueAt: Number(parsed.nextDueAt),
+          lastSentAt: Number(parsed.lastSentAt || 0),
+          dailyDate: parsed.dailyDate || todayKey,
+          dailyCount: Number(parsed.dailyCount || 0),
+          firstRunDone: Boolean(parsed.firstRunDone)
+        };
+      }
+    }
+  } catch {}
+
+  const initial = {
+    nextDueAt: now + randomBetween(PROACTIVE_FIRST_MIN_MS, PROACTIVE_FIRST_MAX_MS),
+    lastSentAt: 0,
+    dailyDate: proactiveDateKey(),
+    dailyCount: 0,
+    firstRunDone: false
+  };
+
+  localStorage.setItem(PROACTIVE_STATE_KEY, JSON.stringify(initial));
+  return initial;
+}
+
+function saveProactiveState() {
+  localStorage.setItem(PROACTIVE_STATE_KEY, JSON.stringify(proactiveState));
+}
+
+function refreshProactiveDay() {
+  const todayKey = proactiveDateKey();
+  if (proactiveState.dailyDate !== todayKey) {
+    proactiveState.dailyDate = todayKey;
+    proactiveState.dailyCount = 0;
+    saveProactiveState();
+  }
+}
+
+function nextAllowedMorningTimestamp(now = new Date()) {
+  const target = new Date(now);
+  const hour = now.getHours() + now.getMinutes() / 60;
+
+  if (hour >= 22.5) {
+    target.setDate(target.getDate() + 1);
+    target.setHours(7, 15 + Math.floor(Math.random() * 45), 0, 0);
+    return target.getTime();
+  }
+
+  if (hour < 7) {
+    target.setHours(7, 15 + Math.floor(Math.random() * 45), 0, 0);
+    return target.getTime();
+  }
+
+  return null;
+}
+
+function isProactiveQuietTime(date = new Date()) {
+  const hour = date.getHours() + date.getMinutes() / 60;
+  return hour >= 22.5 || hour < 7;
+}
+
+function scheduleNextProactive(mode = "normal") {
+  const now = Date.now();
+  const quietTarget = nextAllowedMorningTimestamp(new Date());
+
+  if (quietTarget) {
+    proactiveState.nextDueAt = quietTarget;
+  } else if (mode === "retry") {
+    proactiveState.nextDueAt = now + randomBetween(PROACTIVE_RETRY_MIN_MS, PROACTIVE_RETRY_MAX_MS);
+  } else if (mode === "first") {
+    proactiveState.nextDueAt = now + randomBetween(PROACTIVE_FIRST_MIN_MS, PROACTIVE_FIRST_MAX_MS);
+  } else {
+    proactiveState.nextDueAt = now + randomBetween(PROACTIVE_NORMAL_MIN_MS, PROACTIVE_NORMAL_MAX_MS);
+  }
+
+  saveProactiveState();
+}
+
+function noteUserActivityForProactive() {
+  proactiveState.firstRunDone = true;
+  scheduleNextProactive("normal");
+}
+
+function getLatestMessageBySender(sender) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.sender === sender) return messages[index];
+  }
+  return null;
+}
+
+function getLastUserActivityTimestamp() {
+  const message = getLatestMessageBySender("mashiro");
+  return message ? Date.parse(message.createdAt) || 0 : 0;
+}
+
+function getLastNatsukiTimestamp() {
+  const message = getLatestMessageBySender("natsuki");
+  return message ? Date.parse(message.createdAt) || 0 : 0;
+}
+
+function proactiveEndpointFor(apiEndpoint) {
+  return String(apiEndpoint || "").replace(/\/api\/chat(?:\?.*)?$/, "/api/proactive");
+}
+
+async function callProactiveAIOnce(accessCode, apiEndpoint) {
+  const endpoint = proactiveEndpointFor(apiEndpoint);
+  if (!endpoint || endpoint === apiEndpoint) {
+    const error = new Error("invalid_proactive_endpoint");
+    error.code = "invalid_proactive_endpoint";
+    throw error;
+  }
+
+  proactiveRequestController = new AbortController();
+  const timeout = setTimeout(() => proactiveRequestController.abort(), 45000);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-App-Code": accessCode
+      },
+      body: JSON.stringify({
+        messages: recentHistoryForAPI(),
+        memories: memoriesForAPI(),
+        currentTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
+        localTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        proactiveContext: {
+          lastUserActivityAt: getLastUserActivityTimestamp()
+            ? new Date(getLastUserActivityTimestamp()).toISOString()
+            : null,
+          lastNatsukiMessageAt: getLastNatsukiTimestamp()
+            ? new Date(getLastNatsukiTimestamp()).toISOString()
+            : null,
+          messagesToday: proactiveState.dailyCount
+        }
+      }),
+      signal: proactiveRequestController.signal,
+      cache: "no-store"
+    });
+
+    let data = {};
+    try { data = await response.json(); } catch {}
+
+    if (response.status === 401) {
+      const error = new Error("invalid_app_code");
+      error.code = "invalid_app_code";
+      throw error;
+    }
+
+    if (!response.ok) {
+      const error = new Error(String(data?.error || `http_${response.status}`));
+      error.status = response.status;
+      if (response.status === 429) error.code = "rate_limited";
+      else if ([500, 502, 503, 504].includes(response.status)) error.code = "temporary_error";
+      else error.code = "api_error";
+      throw error;
+    }
+
+    return {
+      send: Boolean(data?.send),
+      message: typeof data?.message === "string" ? data.message.trim() : ""
+    };
+  } finally {
+    clearTimeout(timeout);
+    proactiveRequestController = null;
+  }
+}
+
+async function callProactiveAI(accessCode, apiEndpoint) {
+  let lastError;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await callProactiveAIOnce(accessCode, apiEndpoint);
+    } catch (error) {
+      lastError = error;
+      const retryable =
+        error?.name === "AbortError" ||
+        error instanceof TypeError ||
+        error?.code === "temporary_error" ||
+        error?.code === "rate_limited";
+
+      if (!retryable || attempt === 1) throw error;
+
+      await warmBackend(apiEndpoint);
+      await sleep(1800);
+    }
+  }
+
+  throw lastError;
+}
+
+function addProactiveMessage(text) {
+  const message = {
+    id: makeId(),
+    sender: "natsuki",
+    text,
+    createdAt: new Date().toISOString(),
+    read: true,
+    proactive: true
+  };
+
+  messages.push(message);
+  saveMessages();
+  renderMessages();
+  scrollToBottom();
+  return message;
+}
+
+async function maybeSendProactiveMessage() {
+  refreshProactiveDay();
+
+  if (document.visibilityState !== "visible") return;
+  if (isReplying || proactiveRequestController) return;
+  if (messageInput.value.trim()) return;
+  if (Date.now() < Number(proactiveState.nextDueAt || 0)) return;
+
+  if (isProactiveQuietTime()) {
+    scheduleNextProactive("normal");
+    return;
+  }
+
+  if (proactiveState.dailyCount >= PROACTIVE_DAILY_MAX) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(7, 30 + Math.floor(Math.random() * 60), 0, 0);
+    proactiveState.nextDueAt = tomorrow.getTime();
+    saveProactiveState();
+    return;
+  }
+
+  const now = Date.now();
+  const lastUserAt = getLastUserActivityTimestamp();
+  const lastNatsukiAt = getLastNatsukiTimestamp();
+  const lastMessage = messages[messages.length - 1];
+
+  if (lastUserAt && now - lastUserAt < PROACTIVE_RECENT_USER_COOLDOWN_MS) {
+    scheduleNextProactive("retry");
+    return;
+  }
+
+  if (
+    lastMessage?.sender === "natsuki" &&
+    lastNatsukiAt &&
+    now - lastNatsukiAt < PROACTIVE_RECENT_NATSUKI_COOLDOWN_MS
+  ) {
+    scheduleNextProactive("normal");
+    return;
+  }
+
+  const apiEndpoint = getApiEndpoint();
+  const accessCode = getAccessCode();
+
+  // 自発メッセージのためだけに設定ダイアログを突然出さない。
+  if (!apiEndpoint || !accessCode) {
+    scheduleNextProactive("retry");
+    return;
+  }
+
+  await warmBackend(apiEndpoint);
+
+  setTyping(true);
+  const typingStartedAt = Date.now();
+
+  try {
+    const result = await callProactiveAI(accessCode, apiEndpoint);
+    const remaining = Math.max(0, 850 - (Date.now() - typingStartedAt));
+    if (remaining) await sleep(remaining);
+    setTyping(false);
+
+    if (result.send && result.message) {
+      addProactiveMessage(result.message);
+      proactiveState.lastSentAt = Date.now();
+      proactiveState.dailyCount += 1;
+      proactiveState.firstRunDone = true;
+      scheduleNextProactive("normal");
+    } else {
+      scheduleNextProactive("retry");
+    }
+  } catch {
+    setTyping(false);
+    // 自発メッセージ失敗はユーザー操作を邪魔しないよう、トーストを出さず静かに再試行。
+    scheduleNextProactive("retry");
+  }
+}
+
+function startProactiveScheduler() {
+  if (proactiveCheckTimer) clearInterval(proactiveCheckTimer);
+
+  setTimeout(() => {
+    maybeSendProactiveMessage();
+  }, 1200);
+
+  proactiveCheckTimer = setInterval(() => {
+    maybeSendProactiveMessage();
+  }, 60 * 1000);
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      setTimeout(() => maybeSendProactiveMessage(), 700);
+    }
+  });
+
+  window.addEventListener("focus", () => {
+    setTimeout(() => maybeSendProactiveMessage(), 700);
+  });
 }
 
 function formatTime(iso) {
@@ -1137,6 +1485,7 @@ composer.addEventListener("submit", (event) => {
   if (!text) return;
 
   addMessage("mashiro", text, false);
+  noteUserActivityForProactive();
   messageInput.value = "";
   autosizeInput();
   scheduleAIReply();
@@ -1165,7 +1514,9 @@ confirmReset.addEventListener("click", () => {
 
 function resetConversation(clearMemory = false) {
   currentRequestController?.abort();
+  proactiveRequestController?.abort();
   currentRequestController = null;
+  proactiveRequestController = null;
   isReplying = false;
   setTyping(false);
   messages = seedMessages();
@@ -1174,6 +1525,15 @@ function resetConversation(clearMemory = false) {
     longTermMemories = [];
     localStorage.removeItem(MEMORY_STORAGE_KEY);
   }
+  proactiveState = {
+    nextDueAt: Date.now() + randomBetween(PROACTIVE_FIRST_MIN_MS, PROACTIVE_FIRST_MAX_MS),
+    lastSentAt: 0,
+    dailyDate: proactiveDateKey(),
+    dailyCount: 0,
+    firstRunDone: false
+  };
+  saveProactiveState();
+
   renderMessages();
   autosizeInput();
   setTimeout(() => scrollToBottom("auto"), 0);
@@ -1203,6 +1563,7 @@ renderMessages();
 autosizeInput();
 setTimeout(() => scrollToBottom("auto"), 0);
 registerServiceWorker();
+startProactiveScheduler();
 
 </script>
 </body>
