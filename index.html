@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.4</title>
+  <title>ましろLINE（仮） Phase 2.4.1</title>
   <style>
 :root {
   color-scheme: light;
@@ -934,6 +934,34 @@ button { -webkit-tap-highlight-color: transparent; }
   cursor: default;
 }
 
+.notification-forced-test-wrap {
+  padding: 0 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.notification-forced-test {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #d7dbdf;
+  border-radius: 11px;
+  background: #fff;
+  color: #33363b;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.notification-forced-test:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.notification-forced-test-note {
+  margin-top: 7px;
+  color: #858a90;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .notification-setting-row {
   min-height: 52px;
   display: grid;
@@ -1663,6 +1691,7 @@ function endpointFor(apiEndpoint,kind){
   if(kind==="pushAck")return `${base}/api/push/ack`;
   if(kind==="pushUnregister")return `${base}/api/push/unregister`;
   if(kind==="pushTest")return `${base}/api/push/test`;
+  if(kind==="pushNatsukiProactiveTest")return `${base}/api/push/test-proactive-natsuki`;
   if(kind==="pushRunDue")return `${base}/api/push/run-due`;
   return apiEndpoint;
 }
@@ -1912,6 +1941,34 @@ async function sendTestPush(){
   }catch{showToast("テスト通知を送れませんでした");}
 }
 
+async function sendForcedNatsukiProactiveTest(){
+  if(!pushNotificationsEnabled()){
+    showToast("先に通知を有効にしてください");
+    return;
+  }
+
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
+  if(!apiEndpoint||!accessCode)return;
+
+  try{
+    showToast("夏樹の自発メッセージを生成しています…",3500);
+
+    // 直前の会話・長期記憶を先にBackendへ同期してからテストする。
+    await syncPushSnapshotNow();
+
+    await fetchJsonWithRetry(endpointFor(apiEndpoint,"pushNatsukiProactiveTest"),{
+      method:"POST",
+      headers:pushAuthHeaders(accessCode),
+      body:JSON.stringify({deviceId:getPushDeviceId()})
+    },0);
+
+    showToast("夏樹の自発通知を送信しました",3500);
+  }catch(error){
+    console.error(error);
+    showToast("夏樹の自発通知テストに失敗しました",5000);
+  }
+}
+
 async function syncPushSnapshotNow(){
   if(!pushNotificationsEnabled())return;
   const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
@@ -2086,6 +2143,12 @@ function buildNotificationSettingsSection(){
   const testButton=document.createElement("button");testButton.type="button";testButton.className="notification-action secondary";testButton.textContent="テスト通知";testButton.disabled=!pushNotificationsEnabled();testButton.addEventListener("click",sendTestPush);
   actions.append(mainButton,testButton);
   card.appendChild(actions);
+
+  const forcedWrap=document.createElement("div");forcedWrap.className="notification-forced-test-wrap";
+  const forcedButton=document.createElement("button");forcedButton.type="button";forcedButton.className="notification-forced-test";forcedButton.textContent="夏樹の自発通知を今すぐテスト";forcedButton.disabled=!pushNotificationsEnabled();forcedButton.addEventListener("click",sendForcedNatsukiProactiveTest);
+  const forcedNote=document.createElement("div");forcedNote.className="notification-forced-test-note";forcedNote.textContent="自然な待ち時間を無視し、このテスト時だけ夏樹から実際の自発メッセージを1通生成します。通常の送信回数・次回予定には影響しません。";
+  forcedWrap.append(forcedButton,forcedNote);
+  card.appendChild(forcedWrap);
 
   const enabled=pushNotificationsEnabled();
   card.appendChild(createNotificationToggle("個別トーク","キャラクターからの自発メッセージ",settings.dmEnabled,(value)=>{const s=getPushSettings();s.dmEnabled=value;savePushSettings(s);renderSettingsScreen();},!enabled));
