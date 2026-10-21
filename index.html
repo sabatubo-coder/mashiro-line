@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.1</title>
+  <title>ましろLINE（仮） Phase 2.2</title>
   <style>
 :root {
   color-scheme: light;
@@ -581,6 +581,39 @@ button { -webkit-tap-highlight-color: transparent; }
   margin: -7px 0 15px;
 }
 
+
+.avatar-group {
+  background: linear-gradient(135deg, #d9e7ef, #e7ddf2);
+  color: #46536b;
+}
+
+.sender-name {
+  margin: 0 0 3px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #6d7178;
+}
+
+.group-members {
+  margin-top: 2px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-name-section {
+  margin: 4px 0 12px;
+}
+
+.group-name-section label {
+  display: block;
+  margin-bottom: 6px;
+  color: #666a71;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 @media (min-width: 780px) {
   .app {
     max-width: 620px;
@@ -649,10 +682,10 @@ button { -webkit-tap-highlight-color: transparent; }
 <dialog id="resetDialog" class="dialog">
   <form method="dialog" class="dialog-card">
     <h3 id="resetTitle">トークを初期化</h3>
-    <p>このキャラクターとのトーク履歴を最初の状態に戻します。</p>
+    <p>このトーク履歴を最初の状態に戻します。</p>
     <label class="check-row">
       <input id="resetMemoryCheckbox" type="checkbox" />
-      <span>このキャラクターの長期記憶も削除する</span>
+      <span id="resetMemoryLabel">このキャラクターの長期記憶も削除する</span>
     </label>
     <div class="dialog-actions">
       <button class="dialog-button" value="cancel">キャンセル</button>
@@ -666,6 +699,10 @@ button { -webkit-tap-highlight-color: transparent; }
     <h3 id="characterSettingsTitle">アイコン設定</h3>
     <div id="settingsAvatar" class="settings-avatar"></div>
     <div class="settings-caption">選んだ画像はこのiPhone内だけに保存されます。</div>
+    <div id="groupNameSection" class="group-name-section" hidden>
+      <label for="groupNameInput">グループ名</label>
+      <input id="groupNameInput" class="dialog-input" type="text" maxlength="40" placeholder="グループ名" />
+    </div>
     <input id="avatarFileInput" type="file" accept="image/*" hidden />
     <div class="dialog-actions">
       <button id="chooseAvatarButton" class="dialog-button primary full" type="button">写真からアイコンを選ぶ</button>
@@ -691,174 +728,53 @@ const MAX_MEMORIES_SENT_TO_AI = 24;
 const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const CHARACTERS = {
-  natsuki: {
-    id: "natsuki",
-    displayName: "夏樹",
-    fullName: "椎谷 夏樹",
-    initial: "夏",
-    avatarClass: "avatar-natsuki",
-    conversationId: "dm_natsuki",
-    seed: () => {
-      const now = new Date();
-      const yesterday = new Date(now);
-      yesterday.setDate(now.getDate() - 1);
-      yesterday.setHours(21, 18, 0, 0);
-      return [{
-        id: makeId(),
-        senderId: "natsuki",
-        text: "じゃ、また明日",
-        createdAt: yesterday.toISOString(),
-        readByCharacter: true,
-        seenByUser: true,
-        source: "seed"
-      }];
-    },
-    proactive: {
-      dailyMax: 4,
-      normalMinMs: 90 * 60 * 1000,
-      normalMaxMs: 240 * 60 * 1000,
-      recentUserCooldownMs: 20 * 60 * 1000,
-      recentCharacterCooldownMs: 3 * 60 * 60 * 1000
-    }
-  },
+  natsuki: { id:"natsuki", displayName:"夏樹", fullName:"椎谷 夏樹", initial:"夏", avatarClass:"avatar-natsuki", conversationId:"dm_natsuki", seed:seedNatsuki, proactive:{dailyMax:4,normalMinMs:90*60*1000,normalMaxMs:240*60*1000,recentUserCooldownMs:20*60*1000,recentCharacterCooldownMs:3*60*60*1000}},
+  shiki: { id:"shiki", displayName:"四季", fullName:"小々森 四季", initial:"四", avatarClass:"avatar-shiki", conversationId:"dm_shiki", seed:()=>[], proactive:{dailyMax:3,normalMinMs:150*60*1000,normalMaxMs:360*60*1000,recentUserCooldownMs:30*60*1000,recentCharacterCooldownMs:4*60*60*1000}},
+  ichi: { id:"ichi", displayName:"イチ", fullName:"天野 一", initial:"一", avatarClass:"avatar-ichi", conversationId:"dm_ichi", seed:()=>[], proactive:{dailyMax:4,normalMinMs:90*60*1000,normalMaxMs:240*60*1000,recentUserCooldownMs:20*60*1000,recentCharacterCooldownMs:3*60*60*1000}},
+  bunji: { id:"bunji", displayName:"ブンジ", fullName:"日向 文司", initial:"文", avatarClass:"avatar-bunji", conversationId:"dm_bunji", seed:()=>[], proactive:{dailyMax:3,normalMinMs:150*60*1000,normalMaxMs:360*60*1000,recentUserCooldownMs:30*60*1000,recentCharacterCooldownMs:4*60*60*1000}},
+  sosuke: { id:"sosuke", displayName:"ソウスケ", fullName:"京終 蒼介", initial:"蒼", avatarClass:"avatar-sosuke", conversationId:"dm_sosuke", seed:()=>[], proactive:{dailyMax:2,normalMinMs:240*60*1000,normalMaxMs:480*60*1000,recentUserCooldownMs:45*60*1000,recentCharacterCooldownMs:6*60*60*1000}},
+  chiaki: { id:"chiaki", displayName:"千秋", fullName:"柴 千秋", initial:"千", avatarClass:"avatar-chiaki", conversationId:"dm_chiaki", seed:()=>[], proactive:{dailyMax:3,normalMinMs:120*60*1000,normalMaxMs:300*60*1000,recentUserCooldownMs:20*60*1000,recentCharacterCooldownMs:3*60*60*1000}},
+  saku: { id:"saku", displayName:"朔", fullName:"高木 朔", initial:"朔", avatarClass:"avatar-saku", conversationId:"dm_saku", seed:()=>[], proactive:{dailyMax:2,normalMinMs:240*60*1000,normalMaxMs:480*60*1000,recentUserCooldownMs:45*60*1000,recentCharacterCooldownMs:6*60*60*1000}},
+  yuna: { id:"yuna", displayName:"ユナ", fullName:"汐入 ユナ", initial:"ユ", avatarClass:"avatar-yuna", conversationId:"dm_yuna", seed:()=>[], proactive:{dailyMax:4,normalMinMs:120*60*1000,normalMaxMs:300*60*1000,recentUserCooldownMs:20*60*1000,recentCharacterCooldownMs:3*60*60*1000}}
+};
 
-  shiki: {
-    id: "shiki",
-    displayName: "四季",
-    fullName: "小々森 四季",
-    initial: "四",
-    avatarClass: "avatar-shiki",
-    conversationId: "dm_shiki",
-    seed: () => [],
-    proactive: {
-      dailyMax: 3,
-      normalMinMs: 150 * 60 * 1000,
-      normalMaxMs: 360 * 60 * 1000,
-      recentUserCooldownMs: 30 * 60 * 1000,
-      recentCharacterCooldownMs: 4 * 60 * 60 * 1000
-    }
-  },
-
-  ichi: {
-    id: "ichi",
-    displayName: "イチ",
-    fullName: "天野 一",
-    initial: "一",
-    avatarClass: "avatar-ichi",
-    conversationId: "dm_ichi",
-    seed: () => [],
-    proactive: {
-      dailyMax: 4,
-      normalMinMs: 90 * 60 * 1000,
-      normalMaxMs: 240 * 60 * 1000,
-      recentUserCooldownMs: 20 * 60 * 1000,
-      recentCharacterCooldownMs: 3 * 60 * 60 * 1000
-    }
-  },
-
-  bunji: {
-    id: "bunji",
-    displayName: "ブンジ",
-    fullName: "日向 文司",
-    initial: "文",
-    avatarClass: "avatar-bunji",
-    conversationId: "dm_bunji",
-    seed: () => [],
-    proactive: {
-      dailyMax: 3,
-      normalMinMs: 150 * 60 * 1000,
-      normalMaxMs: 360 * 60 * 1000,
-      recentUserCooldownMs: 30 * 60 * 1000,
-      recentCharacterCooldownMs: 4 * 60 * 60 * 1000
-    }
-  },
-
-  sosuke: {
-    id: "sosuke",
-    displayName: "ソウスケ",
-    fullName: "京終 蒼介",
-    initial: "蒼",
-    avatarClass: "avatar-sosuke",
-    conversationId: "dm_sosuke",
-    seed: () => [],
+const GROUPS = {
+  classmates: {
+    id: "classmates",
+    conversationId: "group_classmates",
+    defaultName: "クラスメイト6人",
+    initial: "6",
+    avatarClass: "avatar-group",
+    participants: ["mashiro", "natsuki", "shiki", "ichi", "bunji", "sosuke"],
     proactive: {
       dailyMax: 2,
-      normalMinMs: 240 * 60 * 1000,
-      normalMaxMs: 480 * 60 * 1000,
+      normalMinMs: 180 * 60 * 1000,
+      normalMaxMs: 420 * 60 * 1000,
       recentUserCooldownMs: 45 * 60 * 1000,
-      recentCharacterCooldownMs: 6 * 60 * 60 * 1000
-    }
-  },
-
-  chiaki: {
-    id: "chiaki",
-    displayName: "千秋",
-    fullName: "柴 千秋",
-    initial: "千",
-    avatarClass: "avatar-chiaki",
-    conversationId: "dm_chiaki",
-    seed: () => [],
-    proactive: {
-      dailyMax: 3,
-      normalMinMs: 120 * 60 * 1000,
-      normalMaxMs: 300 * 60 * 1000,
-      recentUserCooldownMs: 20 * 60 * 1000,
-      recentCharacterCooldownMs: 3 * 60 * 60 * 1000
-    }
-  },
-
-  saku: {
-    id: "saku",
-    displayName: "朔",
-    fullName: "高木 朔",
-    initial: "朔",
-    avatarClass: "avatar-saku",
-    conversationId: "dm_saku",
-    seed: () => [],
-    proactive: {
-      dailyMax: 2,
-      normalMinMs: 240 * 60 * 1000,
-      normalMaxMs: 480 * 60 * 1000,
-      recentUserCooldownMs: 45 * 60 * 1000,
-      recentCharacterCooldownMs: 6 * 60 * 60 * 1000
-    }
-  },
-
-  yuna: {
-    id: "yuna",
-    displayName: "ユナ",
-    fullName: "汐入 ユナ",
-    initial: "ユ",
-    avatarClass: "avatar-yuna",
-    conversationId: "dm_yuna",
-    seed: () => [],
-    proactive: {
-      dailyMax: 4,
-      normalMinMs: 120 * 60 * 1000,
-      normalMaxMs: 300 * 60 * 1000,
-      recentUserCooldownMs: 20 * 60 * 1000,
-      recentCharacterCooldownMs: 3 * 60 * 60 * 1000
+      recentGroupCooldownMs: 3 * 60 * 60 * 1000
     }
   }
 };
 
 const CONVERSATIONS = [
-  { id: "dm_natsuki", type: "dm", characterId: "natsuki", participants: ["mashiro", "natsuki"] },
-  { id: "dm_shiki", type: "dm", characterId: "shiki", participants: ["mashiro", "shiki"] },
-  { id: "dm_ichi", type: "dm", characterId: "ichi", participants: ["mashiro", "ichi"] },
-  { id: "dm_bunji", type: "dm", characterId: "bunji", participants: ["mashiro", "bunji"] },
-  { id: "dm_sosuke", type: "dm", characterId: "sosuke", participants: ["mashiro", "sosuke"] },
-  { id: "dm_chiaki", type: "dm", characterId: "chiaki", participants: ["mashiro", "chiaki"] },
-  { id: "dm_saku", type: "dm", characterId: "saku", participants: ["mashiro", "saku"] },
-  { id: "dm_yuna", type: "dm", characterId: "yuna", participants: ["mashiro", "yuna"] }
+  { id:"dm_natsuki", type:"dm", characterId:"natsuki", participants:["mashiro","natsuki"] },
+  { id:"dm_shiki", type:"dm", characterId:"shiki", participants:["mashiro","shiki"] },
+  { id:"dm_ichi", type:"dm", characterId:"ichi", participants:["mashiro","ichi"] },
+  { id:"dm_bunji", type:"dm", characterId:"bunji", participants:["mashiro","bunji"] },
+  { id:"dm_sosuke", type:"dm", characterId:"sosuke", participants:["mashiro","sosuke"] },
+  { id:"group_classmates", type:"group", groupId:"classmates", participants:["mashiro","natsuki","shiki","ichi","bunji","sosuke"] },
+  { id:"dm_chiaki", type:"dm", characterId:"chiaki", participants:["mashiro","chiaki"] },
+  { id:"dm_saku", type:"dm", characterId:"saku", participants:["mashiro","saku"] },
+  { id:"dm_yuna", type:"dm", characterId:"yuna", participants:["mashiro","yuna"] }
 ];
 
 const appState = {
-  activeCharacterId: null,
+  activeConversationId: null,
   isReplying: false,
   currentRequestController: null,
   proactiveRequestControllers: new Map(),
   proactiveTimer: null,
+  proactiveBusy: false,
   toastTimer: null
 };
 
@@ -888,6 +804,7 @@ const accessCancel = document.getElementById("accessCancel");
 const resetDialog = document.getElementById("resetDialog");
 const resetTitle = document.getElementById("resetTitle");
 const resetMemoryCheckbox = document.getElementById("resetMemoryCheckbox");
+const resetMemoryLabel = document.getElementById("resetMemoryLabel");
 const confirmReset = document.getElementById("confirmReset");
 
 const characterDialog = document.getElementById("characterDialog");
@@ -896,39 +813,48 @@ const settingsAvatar = document.getElementById("settingsAvatar");
 const avatarFileInput = document.getElementById("avatarFileInput");
 const chooseAvatarButton = document.getElementById("chooseAvatarButton");
 const resetAvatarButton = document.getElementById("resetAvatarButton");
+const groupNameSection = document.getElementById("groupNameSection");
+const groupNameInput = document.getElementById("groupNameInput");
 
-function makeId() {
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function seedNatsuki() {
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  yesterday.setHours(21, 18, 0, 0);
+  return [{ id:makeId(), senderId:"natsuki", text:"じゃ、また明日", createdAt:yesterday.toISOString(), readByCharacter:true, seenByUser:true, source:"seed" }];
 }
 
-function characterById(characterId) {
-  return CHARACTERS[characterId] || null;
-}
+function makeId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+function characterById(id) { return CHARACTERS[id] || null; }
+function groupById(id) { return GROUPS[id] || null; }
+function conversationById(id) { return CONVERSATIONS.find(c => c.id === id) || null; }
+function activeConversation() { return appState.activeConversationId ? conversationById(appState.activeConversationId) : null; }
+function activeCharacter() { const c=activeConversation(); return c?.type === "dm" ? characterById(c.characterId) : null; }
+function activeGroup() { const c=activeConversation(); return c?.type === "group" ? groupById(c.groupId) : null; }
 
-function messageKey(characterId) {
-  return `mashiroLine.phase2.conversation.${characterById(characterId).conversationId}.messages.v1`;
-}
+function messageKeyForConversation(conversationId) { return `mashiroLine.phase2.conversation.${conversationId}.messages.v1`; }
+function memoryKey(characterId) { return `mashiroLine.phase2.character.${characterId}.memories.v1`; }
+function proactiveKey(characterId) { return `mashiroLine.phase2.character.${characterId}.proactive.v1`; }
+function avatarKey(characterId) { return `mashiroLine.phase2.character.${characterId}.avatar.v1`; }
+function groupMemoryKey(groupId) { return `mashiroLine.phase2.group.${groupId}.memories.v1`; }
+function groupProactiveKey(groupId) { return `mashiroLine.phase2.group.${groupId}.proactive.v1`; }
+function groupAvatarKey(groupId) { return `mashiroLine.phase2.group.${groupId}.avatar.v1`; }
+function groupNameKey(groupId) { return `mashiroLine.phase2.group.${groupId}.name.v1`; }
 
-function memoryKey(characterId) {
-  return `mashiroLine.phase2.character.${characterId}.memories.v1`;
-}
-
-function proactiveKey(characterId) {
-  return `mashiroLine.phase2.character.${characterId}.proactive.v1`;
-}
-
-function avatarKey(characterId) {
-  return `mashiroLine.phase2.character.${characterId}.avatar.v1`;
+function conversationSeed(conversation) {
+  if (conversation.type === "dm") return characterById(conversation.characterId).seed();
+  return [];
 }
 
 function migrateLegacyNatsukiData() {
-  const newMessagesKey = messageKey("natsuki");
+  const conv = conversationById("dm_natsuki");
+  const newMessagesKey = messageKeyForConversation(conv.id);
   if (!localStorage.getItem(newMessagesKey)) {
     try {
       const raw = localStorage.getItem(LEGACY_NATSUKI_MESSAGES_KEY);
       const legacy = raw ? JSON.parse(raw) : null;
       if (Array.isArray(legacy) && legacy.length) {
-        const migrated = legacy.map((message) => ({
+        const migrated = legacy.map(message => ({
           id: message.id || makeId(),
           senderId: message.sender === "mashiro" ? "mashiro" : "natsuki",
           text: String(message.text || ""),
@@ -941,1149 +867,263 @@ function migrateLegacyNatsukiData() {
       }
     } catch {}
   }
-
-  const newMemoryKey = memoryKey("natsuki");
-  if (!localStorage.getItem(newMemoryKey)) {
+  if (!localStorage.getItem(memoryKey("natsuki"))) {
     const raw = localStorage.getItem(LEGACY_NATSUKI_MEMORY_KEY);
-    if (raw) localStorage.setItem(newMemoryKey, raw);
+    if (raw) localStorage.setItem(memoryKey("natsuki"), raw);
   }
-
-  const newProactiveKey = proactiveKey("natsuki");
-  if (!localStorage.getItem(newProactiveKey)) {
+  if (!localStorage.getItem(proactiveKey("natsuki"))) {
     for (const oldKey of LEGACY_NATSUKI_PROACTIVE_KEYS) {
       const raw = localStorage.getItem(oldKey);
-      if (raw) {
-        localStorage.setItem(newProactiveKey, raw);
-        break;
-      }
+      if (raw) { localStorage.setItem(proactiveKey("natsuki"), raw); break; }
     }
   }
 }
 
-function loadMessages(characterId) {
-  const character = characterById(characterId);
+function loadConversationMessages(conversationId) {
+  const conversation = conversationById(conversationId);
+  if (!conversation) return [];
   try {
-    const raw = localStorage.getItem(messageKey(characterId));
+    const raw = localStorage.getItem(messageKeyForConversation(conversationId));
     if (!raw) {
-      const seeded = character.seed();
-      saveMessages(characterId, seeded);
+      const seeded = conversationSeed(conversation);
+      saveConversationMessages(conversationId, seeded);
       return seeded;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : character.seed();
-  } catch {
-    return character.seed();
-  }
+    return Array.isArray(parsed) ? parsed : conversationSeed(conversation);
+  } catch { return conversationSeed(conversation); }
 }
-
-function saveMessages(characterId, messages) {
-  localStorage.setItem(messageKey(characterId), JSON.stringify(messages));
-}
+function saveConversationMessages(conversationId, messages) { localStorage.setItem(messageKeyForConversation(conversationId), JSON.stringify(messages)); }
 
 function pruneMemories(list) {
   const now = Date.now();
-  const valid = (Array.isArray(list) ? list : []).filter((memory) => {
-    if (!memory || typeof memory.text !== "string" || !memory.text.trim()) return false;
-    if (!memory.expiresAt) return true;
-    const expiresAt = Date.parse(memory.expiresAt);
-    return Number.isNaN(expiresAt) || expiresAt > now;
+  const valid = (Array.isArray(list)?list:[]).filter(m => {
+    if (!m || typeof m.text !== "string" || !m.text.trim()) return false;
+    if (!m.expiresAt) return true;
+    const t = Date.parse(m.expiresAt); return Number.isNaN(t) || t > now;
   });
-
-  valid.sort((a, b) => {
-    const importance = Number(b.importance || 1) - Number(a.importance || 1);
-    if (importance !== 0) return importance;
-    return Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0);
-  });
-
+  valid.sort((a,b) => Number(b.importance||1)-Number(a.importance||1) || Date.parse(b.updatedAt||b.createdAt||0)-Date.parse(a.updatedAt||a.createdAt||0));
   return valid.slice(0, MAX_LONG_TERM_MEMORIES);
 }
+function loadMemories(characterId) { try { const raw=localStorage.getItem(memoryKey(characterId)); return pruneMemories(raw?JSON.parse(raw):[]); } catch { return []; } }
+function saveMemories(characterId, memories) { localStorage.setItem(memoryKey(characterId), JSON.stringify(pruneMemories(memories))); }
+function loadGroupMemories(groupId) { try { const raw=localStorage.getItem(groupMemoryKey(groupId)); return pruneMemories(raw?JSON.parse(raw):[]); } catch { return []; } }
+function saveGroupMemories(groupId, memories) { localStorage.setItem(groupMemoryKey(groupId), JSON.stringify(pruneMemories(memories))); }
+function normalizeMemoryText(text) { return String(text||"").trim().replace(/\s+/g," ").replace(/[。．.]+$/g,"").toLowerCase(); }
+function memoryExpiryFromTTL(ttlDays) { const d=Number(ttlDays); if(!Number.isFinite(d)||d>=3650)return null; const x=new Date();x.setDate(x.getDate()+Math.max(1,d));return x.toISOString(); }
 
-function loadMemories(characterId) {
-  try {
-    const raw = localStorage.getItem(memoryKey(characterId));
-    return pruneMemories(raw ? JSON.parse(raw) : []);
-  } catch {
-    return [];
-  }
-}
-
-function saveMemories(characterId, memories) {
-  localStorage.setItem(memoryKey(characterId), JSON.stringify(pruneMemories(memories)));
-}
-
-function normalizeMemoryText(text) {
-  return String(text || "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/[。．.]+$/g, "")
-    .toLowerCase();
-}
-
-function memoryExpiryFromTTL(ttlDays) {
-  const days = Number(ttlDays);
-  if (!Number.isFinite(days) || days >= 3650) return null;
-  const date = new Date();
-  date.setDate(date.getDate() + Math.max(1, days));
-  return date.toISOString();
-}
-
-function mergeMemoryCandidates(characterId, candidates) {
-  if (!Array.isArray(candidates) || !candidates.length) return;
-
-  const memories = loadMemories(characterId);
+function mergeCandidatesIntoList(existingList, candidates) {
+  if (!Array.isArray(candidates) || !candidates.length) return existingList;
+  const memories = pruneMemories(existingList);
   const nowIso = new Date().toISOString();
-
-  for (const candidate of candidates.slice(0, 2)) {
-    const text = String(candidate?.text || "").trim().slice(0, 240);
-    if (!text) continue;
-
-    const key = String(candidate?.key || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_]+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 80);
-
-    const category = ["event", "preference", "habit", "promise", "relationship", "school", "other"]
-      .includes(candidate?.category)
-      ? candidate.category
-      : "other";
-
-    const importance = [1,2,3].includes(Number(candidate?.importance))
-      ? Number(candidate.importance)
-      : 1;
-
-    const normalized = normalizeMemoryText(text);
-
-    let existing = key ? memories.find((memory) => memory.key === key) : null;
-    if (!existing) {
-      existing = memories.find((memory) => normalizeMemoryText(memory.text) === normalized) || null;
-    }
-
-    if (existing) {
-      existing.key = key || existing.key;
-      existing.text = text;
-      existing.category = category;
-      existing.importance = Math.max(Number(existing.importance || 1), importance);
-      existing.updatedAt = nowIso;
-      existing.expiresAt = memoryExpiryFromTTL(candidate?.ttlDays);
-    } else {
-      memories.push({
-        id: makeId(),
-        key: key || `memory_${Date.now()}`,
-        text,
-        category,
-        importance,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        expiresAt: memoryExpiryFromTTL(candidate?.ttlDays)
-      });
-    }
+  for (const candidate of candidates.slice(0,3)) {
+    const text=String(candidate?.text||"").trim().slice(0,240); if(!text)continue;
+    const key=String(candidate?.key||"").trim().toLowerCase().replace(/[^a-z0-9_]+/g,"_").replace(/^_+|_+$/g,"").slice(0,80);
+    const category=["event","preference","habit","promise","relationship","school","other"].includes(candidate?.category)?candidate.category:"other";
+    const importance=[1,2,3].includes(Number(candidate?.importance))?Number(candidate.importance):1;
+    const normalized=normalizeMemoryText(text);
+    let existing=key?memories.find(m=>m.key===key):null;
+    if(!existing) existing=memories.find(m=>normalizeMemoryText(m.text)===normalized)||null;
+    if(existing){ existing.key=key||existing.key; existing.text=text; existing.category=category; existing.importance=Math.max(Number(existing.importance||1),importance); existing.updatedAt=nowIso; existing.expiresAt=memoryExpiryFromTTL(candidate?.ttlDays); }
+    else memories.push({id:makeId(),key:key||`memory_${Date.now()}`,text,category,importance,createdAt:nowIso,updatedAt:nowIso,expiresAt:memoryExpiryFromTTL(candidate?.ttlDays)});
   }
-
-  saveMemories(characterId, memories);
+  return pruneMemories(memories);
 }
+function mergeMemoryCandidates(characterId,candidates){ saveMemories(characterId, mergeCandidatesIntoList(loadMemories(characterId),candidates)); }
+function mergeGroupMemoryCandidates(groupId,candidates){ saveGroupMemories(groupId, mergeCandidatesIntoList(loadGroupMemories(groupId),candidates)); }
+function memoriesForAPI(characterId){ const m=loadMemories(characterId); saveMemories(characterId,m); return m.slice(0,MAX_MEMORIES_SENT_TO_AI); }
+function groupMemoriesForAPI(groupId){ const m=loadGroupMemories(groupId); saveGroupMemories(groupId,m); return m.slice(0,MAX_MEMORIES_SENT_TO_AI); }
 
-function memoriesForAPI(characterId) {
-  const memories = loadMemories(characterId);
-  saveMemories(characterId, memories);
-  return memories.slice(0, MAX_MEMORIES_SENT_TO_AI);
+function getAvatarData(characterId){return localStorage.getItem(avatarKey(characterId))||"";}
+function setAvatarData(characterId,dataUrl){ if(dataUrl)localStorage.setItem(avatarKey(characterId),dataUrl); else localStorage.removeItem(avatarKey(characterId)); }
+function getGroupAvatarData(groupId){return localStorage.getItem(groupAvatarKey(groupId))||"";}
+function setGroupAvatarData(groupId,dataUrl){ if(dataUrl)localStorage.setItem(groupAvatarKey(groupId),dataUrl); else localStorage.removeItem(groupAvatarKey(groupId)); }
+function getGroupName(groupId){const g=groupById(groupId);return localStorage.getItem(groupNameKey(groupId))||g.defaultName;}
+function setGroupName(groupId,name){const g=groupById(groupId);const value=String(name||"").trim().slice(0,40); if(!value||value===g.defaultName)localStorage.removeItem(groupNameKey(groupId)); else localStorage.setItem(groupNameKey(groupId),value);}
+
+function baseAvatarClasses(element){
+  if(element.id==="headerAvatar")return ["avatar"];
+  if(element.id==="typingAvatar")return ["avatar","mini-avatar"];
+  if(element.id==="settingsAvatar")return ["settings-avatar"];
+  return ["talk-avatar"];
 }
-
-function getAvatarData(characterId) {
-  return localStorage.getItem(avatarKey(characterId)) || "";
+function applyCharacterAvatar(element, characterId){
+  const c=characterById(characterId); const data=getAvatarData(characterId);
+  element.className=""; baseAvatarClasses(element).forEach(x=>element.classList.add(x)); element.classList.add(c.avatarClass); element.replaceChildren();
+  if(data){const img=document.createElement("img");img.src=data;img.alt=`${c.displayName}のアイコン`;element.appendChild(img);}else element.textContent=c.initial;
 }
-
-function setAvatarData(characterId, dataUrl) {
-  if (dataUrl) localStorage.setItem(avatarKey(characterId), dataUrl);
-  else localStorage.removeItem(avatarKey(characterId));
+function applyGroupAvatar(element, groupId){
+  const g=groupById(groupId); const data=getGroupAvatarData(groupId);
+  element.className=""; baseAvatarClasses(element).forEach(x=>element.classList.add(x)); element.classList.add(g.avatarClass); element.replaceChildren();
+  if(data){const img=document.createElement("img");img.src=data;img.alt=`${getGroupName(groupId)}のアイコン`;element.appendChild(img);}else element.textContent=g.initial;
 }
+function applyConversationAvatar(element, conversation){ if(conversation.type==="dm")applyCharacterAvatar(element,conversation.characterId);else applyGroupAvatar(element,conversation.groupId); }
 
-function applyAvatar(element, characterId) {
-  const character = characterById(characterId);
-  const dataUrl = getAvatarData(characterId);
+async function makeAvatarDataUrl(file){ const objectUrl=URL.createObjectURL(file); try{const image=await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=objectUrl;});const size=Math.min(image.naturalWidth,image.naturalHeight);const sx=(image.naturalWidth-size)/2,sy=(image.naturalHeight-size)/2;const canvas=document.createElement("canvas");canvas.width=256;canvas.height=256;canvas.getContext("2d").drawImage(image,sx,sy,size,size,0,0,256,256);return canvas.toDataURL("image/jpeg",.86);}finally{URL.revokeObjectURL(objectUrl);} }
 
-  element.className = "";
-  if (element.id === "headerAvatar") element.classList.add("avatar");
-  else if (element.id === "typingAvatar") element.classList.add("avatar", "mini-avatar");
-  else if (element.id === "settingsAvatar") element.classList.add("settings-avatar");
-  else element.classList.add("talk-avatar");
+function formatClock(iso){return new Intl.DateTimeFormat("ja-JP",{hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(iso));}
+function formatListTime(iso){if(!iso)return"";const d=new Date(iso),n=new Date();if(d.getFullYear()===n.getFullYear()&&d.getMonth()===n.getMonth()&&d.getDate()===n.getDate())return formatClock(iso);return new Intl.DateTimeFormat("ja-JP",{month:"numeric",day:"numeric"}).format(d);}
+function dayLabel(iso){const d=new Date(iso),t=new Date(),y=new Date(t);y.setDate(t.getDate()-1);const same=(a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();if(same(d,t))return"今日";if(same(d,y))return"昨日";return new Intl.DateTimeFormat("ja-JP",{month:"numeric",day:"numeric",weekday:"short"}).format(d);}
+function senderDisplayName(senderId){if(senderId==="mashiro")return"あなた";return characterById(senderId)?.displayName||senderId;}
 
-  element.classList.add(character.avatarClass);
-  element.replaceChildren();
-
-  if (dataUrl) {
-    const img = document.createElement("img");
-    img.src = dataUrl;
-    img.alt = `${character.displayName}のアイコン`;
-    element.appendChild(img);
-  } else {
-    element.textContent = character.initial;
-  }
-}
-
-async function makeAvatarDataUrl(file) {
-  const objectUrl = URL.createObjectURL(file);
-
-  try {
-    const image = await new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
-      img.src = objectUrl;
-    });
-
-    const size = Math.min(image.naturalWidth, image.naturalHeight);
-    const sx = (image.naturalWidth - size) / 2;
-    const sy = (image.naturalHeight - size) / 2;
-    const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 256;
-    const context = canvas.getContext("2d");
-    context.drawImage(image, sx, sy, size, size, 0, 0, 256, 256);
-    return canvas.toDataURL("image/jpeg", .86);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-}
-
-function formatClock(iso) {
-  const date = new Date(iso);
-  return new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
-}
-
-function formatListTime(iso) {
-  if (!iso) return "";
-  const date = new Date(iso);
-  const now = new Date();
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-
-  if (sameDay) return formatClock(iso);
-
-  return new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric" }).format(date);
-}
-
-function dayLabel(iso) {
-  const date = new Date(iso);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-
-  const same = (a, b) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-
-  if (same(date, today)) return "今日";
-  if (same(date, yesterday)) return "昨日";
-
-  return new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", weekday: "short" }).format(date);
-}
-
-function renderTalkList() {
+function renderTalkList(){
   talkList.replaceChildren();
-
-  for (const conversation of CONVERSATIONS) {
-    const character = characterById(conversation.characterId);
-    const messages = loadMessages(character.id);
-    const last = messages[messages.length - 1] || null;
-    const unread = messages.filter((message) =>
-      message.senderId === character.id && !message.seenByUser
-    ).length;
-
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "talk-item";
-    item.dataset.characterId = character.id;
-
-    const avatar = document.createElement("div");
-    applyAvatar(avatar, character.id);
-
-    const main = document.createElement("div");
-    main.className = "talk-main";
-
-    const topline = document.createElement("div");
-    topline.className = "talk-topline";
-
-    const name = document.createElement("div");
-    name.className = "talk-name";
-    name.textContent = character.displayName;
-    topline.appendChild(name);
-
-    const preview = document.createElement("div");
-    preview.className = "talk-preview";
-    preview.textContent = last ? last.text : "まだメッセージはありません";
-
-    main.appendChild(topline);
-    main.appendChild(preview);
-
-    const side = document.createElement("div");
-    side.className = "talk-side";
-
-    const time = document.createElement("div");
-    time.className = "talk-time";
-    time.textContent = last ? formatListTime(last.createdAt) : "";
-    side.appendChild(time);
-
-    if (unread > 0) {
-      const badge = document.createElement("div");
-      badge.className = "unread-badge";
-      badge.textContent = unread > 99 ? "99+" : String(unread);
-      side.appendChild(badge);
-    }
-
-    item.appendChild(avatar);
-    item.appendChild(main);
-    item.appendChild(side);
-
-    item.addEventListener("click", () => openChat(character.id));
-    talkList.appendChild(item);
+  for(const conversation of CONVERSATIONS){
+    const messages=loadConversationMessages(conversation.id); const last=messages[messages.length-1]||null;
+    const unread=messages.filter(m=>m.senderId!=="mashiro"&&!m.seenByUser).length;
+    const item=document.createElement("button");item.type="button";item.className="talk-item";item.dataset.conversationId=conversation.id;
+    const avatar=document.createElement("div");applyConversationAvatar(avatar,conversation);
+    const main=document.createElement("div");main.className="talk-main";
+    const top=document.createElement("div");top.className="talk-topline";
+    const name=document.createElement("div");name.className="talk-name";name.textContent=conversation.type==="dm"?characterById(conversation.characterId).displayName:getGroupName(conversation.groupId);top.appendChild(name);
+    const preview=document.createElement("div");preview.className="talk-preview";
+    if(last){const prefix=conversation.type==="group"?`${senderDisplayName(last.senderId)}: `:"";preview.textContent=prefix+last.text;}else preview.textContent="まだメッセージはありません";
+    main.append(top,preview);
+    const side=document.createElement("div");side.className="talk-side";const time=document.createElement("div");time.className="talk-time";time.textContent=last?formatListTime(last.createdAt):"";side.appendChild(time);
+    if(unread>0){const badge=document.createElement("div");badge.className="unread-badge";badge.textContent=unread>99?"99+":String(unread);side.appendChild(badge);}
+    item.append(avatar,main,side); item.addEventListener("click",()=>openConversation(conversation.id));talkList.appendChild(item);
   }
 }
 
-function activeCharacter() {
-  return appState.activeCharacterId ? characterById(appState.activeCharacterId) : null;
-}
+function markIncomingSeen(conversationId){const msgs=loadConversationMessages(conversationId);let changed=false;for(const m of msgs){if(m.senderId!=="mashiro"&&!m.seenByUser){m.seenByUser=true;changed=true;}}if(changed)saveConversationMessages(conversationId,msgs);}
 
-function markIncomingSeen(characterId) {
-  const messages = loadMessages(characterId);
-  let changed = false;
-
-  for (const message of messages) {
-    if (message.senderId === characterId && !message.seenByUser) {
-      message.seenByUser = true;
-      changed = true;
-    }
+function openConversation(conversationId,pushHistory=true){
+  const conversation=conversationById(conversationId);if(!conversation)return;
+  appState.activeConversationId=conversationId;markIncomingSeen(conversationId);
+  if(conversation.type==="dm"){
+    const c=characterById(conversation.characterId);chatTitle.textContent=c.displayName;statusText.textContent="オンライン";typingLabel.textContent=`${c.displayName}が入力中…`;applyCharacterAvatar(headerAvatar,c.id);applyCharacterAvatar(typingAvatar,c.id);
+  }else{
+    const g=groupById(conversation.groupId);chatTitle.textContent=getGroupName(g.id);statusText.textContent="6人";typingLabel.textContent="誰かが入力中…";applyGroupAvatar(headerAvatar,g.id);applyGroupAvatar(typingAvatar,g.id);
   }
-
-  if (changed) saveMessages(characterId, messages);
+  listScreen.hidden=true;chatScreen.hidden=false;renderMessages();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);
+  if(pushHistory)history.pushState({conversationId},"",`#chat=${conversationId}`);
 }
+function showTalkList(pushHistory=true){appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";autosizeInput();chatScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
 
-function openChat(characterId, pushHistory = true) {
-  const character = characterById(characterId);
-  if (!character) return;
-
-  appState.activeCharacterId = characterId;
-  markIncomingSeen(characterId);
-
-  chatTitle.textContent = character.displayName;
-  statusText.textContent = "オンライン";
-  typingLabel.textContent = `${character.displayName}が入力中…`;
-  applyAvatar(headerAvatar, characterId);
-  applyAvatar(typingAvatar, characterId);
-
-  listScreen.hidden = true;
-  chatScreen.hidden = false;
-
-  renderMessages();
-  autosizeInput();
-  setTimeout(() => scrollToBottom("auto"), 0);
-
-  if (pushHistory) {
-    history.pushState({ characterId }, "", `#chat=${characterId}`);
+function renderMessages(){
+  const conversation=activeConversation();if(!conversation)return;const messages=loadConversationMessages(conversation.id);messageList.replaceChildren();let previousDay="";
+  for(const message of messages){
+    const currentDay=dayLabel(message.createdAt);if(currentDay!==previousDay){const divider=document.createElement("div");divider.className="day-divider";const span=document.createElement("span");span.textContent=currentDay;divider.appendChild(span);messageList.appendChild(divider);previousDay=currentDay;}
+    const outgoing=message.senderId==="mashiro";const row=document.createElement("div");row.className=`message-row ${outgoing?"outgoing":"incoming"}`;
+    if(!outgoing){const mini=document.createElement("div");applyCharacterAvatar(mini,message.senderId);mini.classList.add("mini-avatar");row.appendChild(mini);}
+    const stack=document.createElement("div");stack.className="message-stack";
+    if(conversation.type==="group"&&!outgoing){const sender=document.createElement("div");sender.className="sender-name";sender.textContent=senderDisplayName(message.senderId);stack.appendChild(sender);}
+    const bubble=document.createElement("div");bubble.className="bubble";bubble.textContent=message.text;
+    const meta=document.createElement("div");meta.className="message-meta";
+    if(outgoing&&message.readByCharacter){const read=document.createElement("span");read.textContent=conversation.type==="group"?"既読 5":"既読";meta.appendChild(read);}
+    const clock=document.createElement("span");clock.textContent=formatClock(message.createdAt);meta.appendChild(clock);stack.append(bubble,meta);row.appendChild(stack);messageList.appendChild(row);
   }
 }
+function scrollToBottom(behavior="smooth"){requestAnimationFrame(()=>messageList.scrollTo({top:messageList.scrollHeight,behavior}));}
+function showToast(text,duration=3200){clearTimeout(appState.toastTimer);toast.textContent=text;toast.classList.add("visible");appState.toastTimer=setTimeout(()=>toast.classList.remove("visible"),duration);}
 
-function showTalkList(pushHistory = true) {
-  appState.activeCharacterId = null;
-  appState.isReplying = false;
-  setTyping(false);
-  messageInput.value = "";
-  autosizeInput();
-
-  chatScreen.hidden = true;
-  listScreen.hidden = false;
-  renderTalkList();
-
-  if (pushHistory) {
-    history.pushState({ list: true }, "", location.pathname + location.search);
+function setTyping(visible,speakerId=null){
+  const conversation=activeConversation();if(!conversation){typingRow.classList.remove("visible");return;}
+  if(visible){
+    if(conversation.type==="dm")applyCharacterAvatar(typingAvatar,conversation.characterId);
+    else if(speakerId&&characterById(speakerId)){applyCharacterAvatar(typingAvatar,speakerId);typingLabel.textContent=`${senderDisplayName(speakerId)}が入力中…`;}
+    else{applyGroupAvatar(typingAvatar,conversation.groupId);typingLabel.textContent="誰かが入力中…";}
   }
+  typingRow.classList.toggle("visible",visible);typingRow.setAttribute("aria-hidden",visible?"false":"true");
+  statusText.textContent=visible?"入力中…":conversation.type==="dm"?"オンライン":"6人";if(visible)scrollToBottom();
 }
+function autosizeInput(){messageInput.style.height="auto";messageInput.style.height=`${Math.min(messageInput.scrollHeight,120)}px`;sendButton.disabled=!messageInput.value.trim()||appState.isReplying||!appState.activeConversationId;}
 
-function renderMessages() {
-  const character = activeCharacter();
-  if (!character) return;
-
-  const messages = loadMessages(character.id);
-  messageList.replaceChildren();
-
-  let previousDay = "";
-
-  for (const message of messages) {
-    const currentDay = dayLabel(message.createdAt);
-
-    if (currentDay !== previousDay) {
-      const divider = document.createElement("div");
-      divider.className = "day-divider";
-      const span = document.createElement("span");
-      span.textContent = currentDay;
-      divider.appendChild(span);
-      messageList.appendChild(divider);
-      previousDay = currentDay;
-    }
-
-    const outgoing = message.senderId === "mashiro";
-    const row = document.createElement("div");
-    row.className = `message-row ${outgoing ? "outgoing" : "incoming"}`;
-
-    if (!outgoing) {
-      const miniAvatar = document.createElement("div");
-      applyAvatar(miniAvatar, character.id);
-      miniAvatar.classList.add("mini-avatar");
-      row.appendChild(miniAvatar);
-    }
-
-    const stack = document.createElement("div");
-    stack.className = "message-stack";
-
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    bubble.textContent = message.text;
-
-    const meta = document.createElement("div");
-    meta.className = "message-meta";
-
-    if (outgoing && message.readByCharacter) {
-      const read = document.createElement("span");
-      read.textContent = "既読";
-      meta.appendChild(read);
-    }
-
-    const clock = document.createElement("span");
-    clock.textContent = formatClock(message.createdAt);
-    meta.appendChild(clock);
-
-    stack.appendChild(bubble);
-    stack.appendChild(meta);
-    row.appendChild(stack);
-    messageList.appendChild(row);
-  }
+function addMessage(conversationId,senderId,text,options={}){
+  const conversation=conversationById(conversationId);const messages=loadConversationMessages(conversationId);const activeVisible=appState.activeConversationId===conversationId&&!chatScreen.hidden&&document.visibilityState==="visible";
+  const message={id:makeId(),senderId,text:String(text||"").trim(),createdAt:options.createdAt||new Date().toISOString(),readByCharacter:senderId==="mashiro"?Boolean(options.readByCharacter):true,seenByUser:senderId!=="mashiro"?(options.seenByUser??activeVisible):true,source:options.source||"ai"};
+  messages.push(message);saveConversationMessages(conversationId,messages);if(appState.activeConversationId===conversationId){if(senderId!=="mashiro")markIncomingSeen(conversationId);renderMessages();scrollToBottom();}renderTalkList();return message;
 }
+function markOutgoingRead(conversationId){const messages=loadConversationMessages(conversationId);let changed=false;for(const m of messages){if(m.senderId==="mashiro"&&!m.readByCharacter){m.readByCharacter=true;changed=true;}}if(changed){saveConversationMessages(conversationId,messages);if(appState.activeConversationId===conversationId)renderMessages();renderTalkList();}}
 
-function scrollToBottom(behavior = "smooth") {
-  requestAnimationFrame(() => {
-    messageList.scrollTo({ top: messageList.scrollHeight, behavior });
-  });
-}
+function getAccessCode(){return localStorage.getItem(ACCESS_CODE_KEY)||"";}
+function askForAccessCode(){return new Promise(resolve=>{accessCodeInput.value=getAccessCode();const cleanup=()=>{accessForm.removeEventListener("submit",onSubmit);accessCancel.removeEventListener("click",onCancel);accessDialog.removeEventListener("cancel",onCancel);};const onSubmit=e=>{e.preventDefault();const code=accessCodeInput.value.trim();if(!code){showToast("接続コードを入力してください");return;}localStorage.setItem(ACCESS_CODE_KEY,code);cleanup();accessDialog.close();resolve(code);};const onCancel=e=>{e?.preventDefault?.();cleanup();accessDialog.close();resolve("");};accessForm.addEventListener("submit",onSubmit);accessCancel.addEventListener("click",onCancel);accessDialog.addEventListener("cancel",onCancel);accessDialog.showModal();setTimeout(()=>accessCodeInput.focus(),50);});}
+function normalizeBackendUrl(value){const raw=String(value||"").trim().replace(/\/+$/,"");if(!/^https:\/\//i.test(raw))return"";return `${raw}/api/chat`;}
+function getApiEndpoint(){if(CONFIGURED_API_ENDPOINT)return CONFIGURED_API_ENDPOINT;const saved=localStorage.getItem(BACKEND_URL_KEY)||"";return saved?normalizeBackendUrl(saved):"";}
+function endpointFor(apiEndpoint,kind){const base=String(apiEndpoint).replace(/\/api\/chat(?:\?.*)?$/,"/").replace(/\/$/,"");if(kind==="health")return `${base}/health`;if(kind==="proactive")return `${base}/api/proactive`;if(kind==="groupChat")return `${base}/api/group/chat`;if(kind==="groupProactive")return `${base}/api/group/proactive`;return apiEndpoint;}
+function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
+async function warmBackend(apiEndpoint){const health=endpointFor(apiEndpoint,"health");const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),10000);try{await fetch(health,{method:"GET",cache:"no-store",signal:controller.signal});}catch{}finally{clearTimeout(timeout);}}
+function recentHistoryForAPI(conversationId){return loadConversationMessages(conversationId).slice(-40).map(m=>({senderId:m.senderId,text:m.text,createdAt:m.createdAt}));}
 
-function showToast(text, duration = 3200) {
-  clearTimeout(appState.toastTimer);
-  toast.textContent = text;
-  toast.classList.add("visible");
-  appState.toastTimer = setTimeout(() => toast.classList.remove("visible"), duration);
-}
+async function fetchJsonWithRetry(endpoint,options,retries=1){let lastError;for(let attempt=0;attempt<=retries;attempt++){const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),60000);try{const response=await fetch(endpoint,{...options,signal:controller.signal,cache:"no-store"});const data=await response.json().catch(()=>({}));if(response.status===401){localStorage.removeItem(ACCESS_CODE_KEY);throw Object.assign(new Error("invalid_app_code"),{code:"invalid_app_code"});}if(!response.ok){const e=Object.assign(new Error(String(data?.error||`http_${response.status}`)),{code:[429,500,502,503,504].includes(response.status)?"temporary_error":response.status===403?"origin_not_allowed":"api_error"});throw e;}return data;}catch(error){lastError=error;const retryable=error?.name==="AbortError"||error instanceof TypeError||error?.code==="temporary_error";if(!retryable||attempt===retries)throw error;await sleep(1800);}finally{clearTimeout(timeout);}}throw lastError;}
 
-function setTyping(visible, characterId = appState.activeCharacterId) {
-  const active = activeCharacter();
-  if (!active || active.id !== characterId) {
-    typingRow.classList.remove("visible");
-    typingRow.setAttribute("aria-hidden", "true");
-    return;
-  }
+async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages:recentHistoryForAPI(conversation.id),memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone})});}
+function privateMemoriesForGroup(group){const map={};for(const id of group.participants){if(id!=="mashiro"&&characterById(id))map[id]=memoriesForAPI(id);}return map;}
+async function callGroupChat(conversation,accessCode,apiEndpoint){const group=groupById(conversation.groupId);return fetchJsonWithRetry(endpointFor(apiEndpoint,"groupChat"),{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({groupId:group.id,conversationId:conversation.id,messages:recentHistoryForAPI(conversation.id),sharedMemories:groupMemoriesForAPI(group.id),privateMemoriesByCharacter:privateMemoriesForGroup(group),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone})});}
 
-  typingRow.classList.toggle("visible", visible);
-  typingRow.setAttribute("aria-hidden", visible ? "false" : "true");
-  statusText.textContent = visible ? "入力中…" : "オンライン";
-  if (visible) scrollToBottom();
-}
-
-function autosizeInput() {
-  messageInput.style.height = "auto";
-  messageInput.style.height = `${Math.min(messageInput.scrollHeight, 120)}px`;
-  sendButton.disabled = !messageInput.value.trim() || appState.isReplying || !appState.activeCharacterId;
-}
-
-function addMessage(characterId, senderId, text, options = {}) {
-  const messages = loadMessages(characterId);
-  const activeAndVisible =
-    appState.activeCharacterId === characterId &&
-    !chatScreen.hidden &&
-    document.visibilityState === "visible";
-
-  const message = {
-    id: makeId(),
-    senderId,
-    text: String(text || "").trim(),
-    createdAt: options.createdAt || new Date().toISOString(),
-    readByCharacter: senderId === "mashiro" ? Boolean(options.readByCharacter) : true,
-    seenByUser: senderId === characterId ? (options.seenByUser ?? activeAndVisible) : true,
-    source: options.source || "ai"
-  };
-
-  messages.push(message);
-  saveMessages(characterId, messages);
-
-  if (appState.activeCharacterId === characterId) {
-    if (message.senderId === characterId) markIncomingSeen(characterId);
-    renderMessages();
-    scrollToBottom();
-  }
-
-  renderTalkList();
-  return message;
-}
-
-function markOutgoingRead(characterId) {
-  const messages = loadMessages(characterId);
-  let changed = false;
-
-  for (const message of messages) {
-    if (message.senderId === "mashiro" && !message.readByCharacter) {
-      message.readByCharacter = true;
-      changed = true;
-    }
-  }
-
-  if (changed) {
-    saveMessages(characterId, messages);
-    if (appState.activeCharacterId === characterId) renderMessages();
-    renderTalkList();
-  }
-}
-
-function getAccessCode() {
-  return localStorage.getItem(ACCESS_CODE_KEY) || "";
-}
-
-function askForAccessCode() {
-  return new Promise((resolve) => {
-    accessCodeInput.value = getAccessCode();
-
-    const cleanup = () => {
-      accessForm.removeEventListener("submit", onSubmit);
-      accessCancel.removeEventListener("click", onCancel);
-      accessDialog.removeEventListener("cancel", onCancel);
-    };
-
-    const onSubmit = (event) => {
-      event.preventDefault();
-      const code = accessCodeInput.value.trim();
-      if (!code) {
-        showToast("接続コードを入力してください");
-        return;
-      }
-
-      localStorage.setItem(ACCESS_CODE_KEY, code);
-      cleanup();
-      accessDialog.close();
-      resolve(code);
-    };
-
-    const onCancel = (event) => {
-      event?.preventDefault?.();
-      cleanup();
-      accessDialog.close();
-      resolve("");
-    };
-
-    accessForm.addEventListener("submit", onSubmit);
-    accessCancel.addEventListener("click", onCancel);
-    accessDialog.addEventListener("cancel", onCancel);
-    accessDialog.showModal();
-    setTimeout(() => accessCodeInput.focus(), 50);
-  });
-}
-
-function normalizeBackendUrl(value) {
-  const raw = String(value || "").trim().replace(/\/+$/, "");
-  if (!/^https:\/\//i.test(raw)) return "";
-  return `${raw}/api/chat`;
-}
-
-function getApiEndpoint() {
-  if (CONFIGURED_API_ENDPOINT) return CONFIGURED_API_ENDPOINT;
-  const saved = localStorage.getItem(BACKEND_URL_KEY) || "";
-  return saved ? normalizeBackendUrl(saved) : "";
-}
-
-function endpointFor(apiEndpoint, kind) {
-  if (kind === "health") return String(apiEndpoint).replace(/\/api\/chat(?:\?.*)?$/, "/health");
-  if (kind === "proactive") return String(apiEndpoint).replace(/\/api\/chat(?:\?.*)?$/, "/api/proactive");
-  return apiEndpoint;
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function warmBackend(apiEndpoint) {
-  const health = endpointFor(apiEndpoint, "health");
-  if (!health || health === apiEndpoint) return;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-
-  try {
-    await fetch(health, { method: "GET", cache: "no-store", signal: controller.signal });
-  } catch {
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function recentHistoryForAPI(characterId) {
-  return loadMessages(characterId).slice(-30).map((message) => ({
-    senderId: message.senderId,
-    text: message.text,
-    createdAt: message.createdAt
-  }));
-}
-
-async function callChatOnce(characterId, accessCode, apiEndpoint) {
-  appState.currentRequestController = new AbortController();
-  const timeout = setTimeout(() => appState.currentRequestController.abort(), 45000);
-
-  try {
-    const response = await fetch(apiEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-App-Code": accessCode
-      },
-      body: JSON.stringify({
-        characterId,
-        conversationId: characterById(characterId).conversationId,
-        messages: recentHistoryForAPI(characterId),
-        memories: memoriesForAPI(characterId),
-        currentTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-      }),
-      signal: appState.currentRequestController.signal,
-      cache: "no-store"
-    });
-
-    let data = {};
-    try { data = await response.json(); } catch {}
-
-    if (response.status === 401) {
-      localStorage.removeItem(ACCESS_CODE_KEY);
-      const error = new Error("invalid_app_code");
-      error.code = "invalid_app_code";
-      throw error;
-    }
-
-    if (!response.ok || typeof data?.reply !== "string" || !data.reply.trim()) {
-      const error = new Error(String(data?.error || `http_${response.status}`));
-      error.code =
-        response.status === 429 ? "rate_limited" :
-        [500,502,503,504].includes(response.status) ? "temporary_error" :
-        response.status === 403 ? "origin_not_allowed" :
-        "api_error";
-      throw error;
-    }
-
-    return {
-      reply: data.reply.trim(),
-      memoryCandidates: Array.isArray(data.memoryCandidates) ? data.memoryCandidates : []
-    };
-  } finally {
-    clearTimeout(timeout);
-    appState.currentRequestController = null;
-  }
-}
-
-async function callChat(characterId, accessCode, apiEndpoint) {
-  let lastError;
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      return await callChatOnce(characterId, accessCode, apiEndpoint);
-    } catch (error) {
-      lastError = error;
-      const retryable =
-        error?.name === "AbortError" ||
-        error instanceof TypeError ||
-        error?.code === "temporary_error" ||
-        error?.code === "rate_limited";
-
-      if (!retryable || attempt === 1) throw error;
-      await warmBackend(apiEndpoint);
-      await sleep(1800);
-    }
-  }
-
-  throw lastError;
-}
-
-async function sendUserMessage() {
-  const character = activeCharacter();
-  const text = messageInput.value.trim();
-
-  if (!character || !text || appState.isReplying) return;
-
-  addMessage(character.id, "mashiro", text, {
-    readByCharacter: false,
-    seenByUser: true,
-    source: "user"
-  });
-
-  messageInput.value = "";
-  autosizeInput();
-
-  appState.isReplying = true;
-  sendButton.disabled = true;
-
-  await sleep(350);
-  markOutgoingRead(character.id);
-  setTyping(true, character.id);
-
-  let apiEndpoint = getApiEndpoint();
-  if (!apiEndpoint) {
-    setTyping(false, character.id);
-    appState.isReplying = false;
-    autosizeInput();
-    showToast("AIバックエンドURLが設定されていません");
-    return;
-  }
-
-  let accessCode = getAccessCode();
-  if (!accessCode) accessCode = await askForAccessCode();
-
-  if (!accessCode) {
-    setTyping(false, character.id);
-    appState.isReplying = false;
-    autosizeInput();
-    return;
-  }
-
+async function sendUserMessage(){
+  const conversation=activeConversation();const text=messageInput.value.trim();if(!conversation||!text||appState.isReplying)return;
+  addMessage(conversation.id,"mashiro",text,{readByCharacter:false,source:"user"});messageInput.value="";autosizeInput();appState.isReplying=true;sendButton.disabled=true;await sleep(350);markOutgoingRead(conversation.id);setTyping(true);
+  const apiEndpoint=getApiEndpoint();if(!apiEndpoint){setTyping(false);appState.isReplying=false;autosizeInput();showToast("AIバックエンドURLが設定されていません");return;}
+  let accessCode=getAccessCode();if(!accessCode)accessCode=await askForAccessCode();if(!accessCode){setTyping(false);appState.isReplying=false;autosizeInput();return;}
   await warmBackend(apiEndpoint);
-
-  const typingStart = Date.now();
-
-  try {
-    const result = await callChat(character.id, accessCode, apiEndpoint);
-    const remaining = Math.max(0, 900 - (Date.now() - typingStart));
-    if (remaining) await sleep(remaining);
-
-    setTyping(false, character.id);
-    addMessage(character.id, character.id, result.reply, {
-      source: "ai",
-      seenByUser: true
-    });
-    mergeMemoryCandidates(character.id, result.memoryCandidates);
-    scheduleProactive(character.id, "normal");
-  } catch (error) {
-    setTyping(false, character.id);
-
-    if (error?.code === "invalid_app_code") {
-      showToast("接続コードが違います。もう一度入力してください");
-      await askForAccessCode();
-    } else {
-      showToast("AIに接続できませんでした。少し待ってもう一度試してください");
+  try{
+    if(conversation.type==="dm"){
+      const result=await callDmChat(conversation,accessCode,apiEndpoint);await sleep(650);setTyping(false);addMessage(conversation.id,conversation.characterId,String(result.reply||"").trim(),{source:"ai",seenByUser:true});mergeMemoryCandidates(conversation.characterId,result.memoryCandidates);scheduleDmProactive(conversation.characterId,"normal");
+    }else{
+      const result=await callGroupChat(conversation,accessCode,apiEndpoint);setTyping(false);const replies=Array.isArray(result.replies)?result.replies.slice(0,3):[];
+      for(const reply of replies){if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;setTyping(true,reply.speakerId);await sleep(550+Math.min(850,String(reply.message).length*12));setTyping(false);addMessage(conversation.id,reply.speakerId,String(reply.message).trim(),{source:"group-ai",seenByUser:true});}
+      mergeGroupMemoryCandidates(conversation.groupId,result.groupMemoryCandidates);scheduleGroupProactive(conversation.groupId,"normal");
     }
-  } finally {
-    appState.isReplying = false;
-    autosizeInput();
-  }
+  }catch(error){setTyping(false);if(error?.code==="invalid_app_code"){showToast("接続コードが違います。もう一度入力してください");await askForAccessCode();}else showToast("AIに接続できませんでした。少し待ってもう一度試してください");}
+  finally{appState.isReplying=false;autosizeInput();}
 }
 
-function dateKey(date = new Date()) {
-  return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;
+function dateKey(date=new Date()){return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;}
+function randomBetween(min,max){return min+Math.random()*(max-min);}
+function isQuietTime(date=new Date()){const h=date.getHours()+date.getMinutes()/60;return h>=22.5||h<7;}
+function nextMorningTimestamp(){const t=new Date();t.setDate(t.getDate()+(t.getHours()>=22?1:0));t.setHours(7,15+Math.floor(Math.random()*45),0,0);return t.getTime();}
+
+function loadDmProactiveState(characterId){const c=characterById(characterId),now=Date.now();try{const raw=localStorage.getItem(proactiveKey(characterId));if(raw){const p=JSON.parse(raw);if(p.dailyDate!==dateKey()){p.dailyDate=dateKey();p.dailyCount=0;}if(!Number.isFinite(Number(p.nextDueAt)))p.nextDueAt=now+randomBetween(c.proactive.normalMinMs,c.proactive.normalMaxMs);return{nextDueAt:Number(p.nextDueAt),lastSentAt:Number(p.lastSentAt||0),dailyDate:p.dailyDate||dateKey(),dailyCount:Number(p.dailyCount||0)};}}catch{}return{nextDueAt:now+randomBetween(c.proactive.normalMinMs,c.proactive.normalMaxMs),lastSentAt:0,dailyDate:dateKey(),dailyCount:0};}
+function saveDmProactiveState(id,state){localStorage.setItem(proactiveKey(id),JSON.stringify(state));}
+function scheduleDmProactive(id,mode="normal"){const c=characterById(id),s=loadDmProactiveState(id),now=Date.now();if(isQuietTime())s.nextDueAt=nextMorningTimestamp();else if(mode==="retry")s.nextDueAt=now+randomBetween(12*60*1000,25*60*1000);else s.nextDueAt=now+randomBetween(c.proactive.normalMinMs,c.proactive.normalMaxMs);saveDmProactiveState(id,s);}
+function latestMessage(conversationId,senderId=null){const messages=loadConversationMessages(conversationId);for(let i=messages.length-1;i>=0;i--){if(!senderId||messages[i].senderId===senderId)return messages[i];}return null;}
+
+async function callDmProactive(characterId,accessCode,apiEndpoint){const c=characterById(characterId),conv=conversationById(c.conversationId),state=loadDmProactiveState(characterId);return fetchJsonWithRetry(endpointFor(apiEndpoint,"proactive"),{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId,conversationId:conv.id,messages:recentHistoryForAPI(conv.id),memories:memoriesForAPI(characterId),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,proactiveContext:{messagesToday:state.dailyCount,lastUserActivityAt:latestMessage(conv.id,"mashiro")?.createdAt||null,lastCharacterMessageAt:latestMessage(conv.id,characterId)?.createdAt||null}})});}
+async function maybeSendDmProactive(characterId){
+  if(document.visibilityState!=="visible")return;const c=characterById(characterId),conv=conversationById(c.conversationId),state=loadDmProactiveState(characterId);if(Date.now()<state.nextDueAt)return;if(isQuietTime()){scheduleDmProactive(characterId);return;}if(state.dailyCount>=c.proactive.dailyMax){state.nextDueAt=nextMorningTimestamp();saveDmProactiveState(characterId,state);return;}
+  const latestUser=latestMessage(conv.id,"mashiro"),latestChar=latestMessage(conv.id,characterId),latestAny=latestMessage(conv.id),now=Date.now();if(latestUser&&now-Date.parse(latestUser.createdAt)<c.proactive.recentUserCooldownMs){scheduleDmProactive(characterId,"retry");return;}if(latestAny?.senderId===characterId&&latestChar&&now-Date.parse(latestChar.createdAt)<c.proactive.recentCharacterCooldownMs){scheduleDmProactive(characterId);return;}
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();if(!apiEndpoint||!accessCode){scheduleDmProactive(characterId,"retry");return;}await warmBackend(apiEndpoint);const show=appState.activeConversationId===conv.id&&!chatScreen.hidden;if(show)setTyping(true,characterId);
+  try{const result=await callDmProactive(characterId,accessCode,apiEndpoint);if(show){await sleep(700);setTyping(false);}if(result?.send&&result.message){addMessage(conv.id,characterId,result.message,{source:"proactive",seenByUser:show});state.lastSentAt=Date.now();state.dailyCount+=1;saveDmProactiveState(characterId,state);scheduleDmProactive(characterId);}else scheduleDmProactive(characterId,"retry");}catch{if(show)setTyping(false);scheduleDmProactive(characterId,"retry");}
 }
 
-function randomBetween(min, max) {
-  return min + Math.random() * (max - min);
+function loadGroupProactiveState(groupId){const g=groupById(groupId),now=Date.now();try{const raw=localStorage.getItem(groupProactiveKey(groupId));if(raw){const p=JSON.parse(raw);if(p.dailyDate!==dateKey()){p.dailyDate=dateKey();p.dailyCount=0;}if(!Number.isFinite(Number(p.nextDueAt)))p.nextDueAt=now+randomBetween(g.proactive.normalMinMs,g.proactive.normalMaxMs);return{nextDueAt:Number(p.nextDueAt),lastSentAt:Number(p.lastSentAt||0),dailyDate:p.dailyDate||dateKey(),dailyCount:Number(p.dailyCount||0)};}}catch{}return{nextDueAt:now+randomBetween(g.proactive.normalMinMs,g.proactive.normalMaxMs),lastSentAt:0,dailyDate:dateKey(),dailyCount:0};}
+function saveGroupProactiveState(id,state){localStorage.setItem(groupProactiveKey(id),JSON.stringify(state));}
+function scheduleGroupProactive(id,mode="normal"){const g=groupById(id),s=loadGroupProactiveState(id),now=Date.now();if(isQuietTime())s.nextDueAt=nextMorningTimestamp();else if(mode==="retry")s.nextDueAt=now+randomBetween(20*60*1000,40*60*1000);else s.nextDueAt=now+randomBetween(g.proactive.normalMinMs,g.proactive.normalMaxMs);saveGroupProactiveState(id,s);}
+async function callGroupProactive(groupId,accessCode,apiEndpoint){const g=groupById(groupId),state=loadGroupProactiveState(groupId);return fetchJsonWithRetry(endpointFor(apiEndpoint,"groupProactive"),{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({groupId,conversationId:g.conversationId,messages:recentHistoryForAPI(g.conversationId),sharedMemories:groupMemoriesForAPI(groupId),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,proactiveContext:{messagesToday:state.dailyCount,lastActivityAt:latestMessage(g.conversationId)?.createdAt||null}})});}
+async function maybeSendGroupProactive(groupId){
+  if(document.visibilityState!=="visible")return;const g=groupById(groupId),state=loadGroupProactiveState(groupId);if(Date.now()<state.nextDueAt)return;if(isQuietTime()){scheduleGroupProactive(groupId);return;}if(state.dailyCount>=g.proactive.dailyMax){state.nextDueAt=nextMorningTimestamp();saveGroupProactiveState(groupId,state);return;}
+  const latestUser=latestMessage(g.conversationId,"mashiro"),latestAny=latestMessage(g.conversationId),now=Date.now();if(latestUser&&now-Date.parse(latestUser.createdAt)<g.proactive.recentUserCooldownMs){scheduleGroupProactive(groupId,"retry");return;}if(latestAny&&latestAny.senderId!=="mashiro"&&now-Date.parse(latestAny.createdAt)<g.proactive.recentGroupCooldownMs){scheduleGroupProactive(groupId);return;}
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();if(!apiEndpoint||!accessCode){scheduleGroupProactive(groupId,"retry");return;}await warmBackend(apiEndpoint);const show=appState.activeConversationId===g.conversationId&&!chatScreen.hidden;if(show)setTyping(true);
+  try{const result=await callGroupProactive(groupId,accessCode,apiEndpoint);if(show)setTyping(false);const replies=Array.isArray(result?.replies)?result.replies.slice(0,2):[];if(replies.length){for(const reply of replies){if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;if(show){setTyping(true,reply.speakerId);await sleep(500);setTyping(false);}addMessage(g.conversationId,reply.speakerId,String(reply.message).trim(),{source:"group-proactive",seenByUser:show});}state.lastSentAt=Date.now();state.dailyCount+=1;saveGroupProactiveState(groupId,state);scheduleGroupProactive(groupId);}else scheduleGroupProactive(groupId,"retry");}catch{if(show)setTyping(false);scheduleGroupProactive(groupId,"retry");}
 }
 
-function loadProactiveState(characterId) {
-  const character = characterById(characterId);
-  const now = Date.now();
-
-  try {
-    const raw = localStorage.getItem(proactiveKey(characterId));
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        if (parsed.dailyDate !== dateKey()) {
-          parsed.dailyDate = dateKey();
-          parsed.dailyCount = 0;
-        }
-
-        if (!Number.isFinite(Number(parsed.nextDueAt))) {
-          parsed.nextDueAt = now + randomBetween(
-            character.proactive.normalMinMs,
-            character.proactive.normalMaxMs
-          );
-        }
-
-        return {
-          nextDueAt: Number(parsed.nextDueAt),
-          lastSentAt: Number(parsed.lastSentAt || 0),
-          dailyDate: parsed.dailyDate || dateKey(),
-          dailyCount: Number(parsed.dailyCount || 0)
-        };
-      }
-    }
-  } catch {}
-
-  return {
-    nextDueAt: now + randomBetween(character.proactive.normalMinMs, character.proactive.normalMaxMs),
-    lastSentAt: 0,
-    dailyDate: dateKey(),
-    dailyCount: 0
-  };
-}
-
-function saveProactiveState(characterId, state) {
-  localStorage.setItem(proactiveKey(characterId), JSON.stringify(state));
-}
-
-function isQuietTime(date = new Date()) {
-  const hour = date.getHours() + date.getMinutes()/60;
-  return hour >= 22.5 || hour < 7;
-}
-
-function nextMorningTimestamp() {
-  const target = new Date();
-  target.setDate(target.getDate() + (target.getHours() >= 22 ? 1 : 0));
-  target.setHours(7, 15 + Math.floor(Math.random()*45), 0, 0);
-  return target.getTime();
-}
-
-function scheduleProactive(characterId, mode = "normal") {
-  const character = characterById(characterId);
-  const state = loadProactiveState(characterId);
-  const now = Date.now();
-
-  if (isQuietTime()) {
-    state.nextDueAt = nextMorningTimestamp();
-  } else if (mode === "retry") {
-    state.nextDueAt = now + randomBetween(12*60*1000, 25*60*1000);
-  } else {
-    state.nextDueAt = now + randomBetween(
-      character.proactive.normalMinMs,
-      character.proactive.normalMaxMs
-    );
-  }
-
-  saveProactiveState(characterId, state);
-}
-
-function latestMessage(characterId, senderId = null) {
-  const messages = loadMessages(characterId);
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (!senderId || messages[index].senderId === senderId) return messages[index];
-  }
-
-  return null;
-}
-
-async function callProactiveOnce(characterId, accessCode, apiEndpoint) {
-  const character = characterById(characterId);
-  const state = loadProactiveState(characterId);
-  const endpoint = endpointFor(apiEndpoint, "proactive");
-  const controller = new AbortController();
-  appState.proactiveRequestControllers.set(characterId, controller);
-  const timeout = setTimeout(() => controller.abort(), 45000);
-
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-App-Code": accessCode
-      },
-      body: JSON.stringify({
-        characterId,
-        conversationId: character.conversationId,
-        messages: recentHistoryForAPI(characterId),
-        memories: memoriesForAPI(characterId),
-        currentTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        proactiveContext: {
-          messagesToday: state.dailyCount,
-          lastUserActivityAt: latestMessage(characterId, "mashiro")?.createdAt || null,
-          lastCharacterMessageAt: latestMessage(characterId, characterId)?.createdAt || null
-        }
-      }),
-      signal: controller.signal,
-      cache: "no-store"
-    });
-
-    const data = await response.json().catch(() => ({}));
-
-    if (response.status === 401) {
-      localStorage.removeItem(ACCESS_CODE_KEY);
-      throw Object.assign(new Error("invalid_app_code"), { code: "invalid_app_code" });
-    }
-
-    if (!response.ok) {
-      throw Object.assign(new Error(String(data?.error || response.status)), {
-        code: [500,502,503,504,429].includes(response.status) ? "temporary_error" : "api_error"
-      });
-    }
-
-    return {
-      send: Boolean(data?.send),
-      message: typeof data?.message === "string" ? data.message.trim() : ""
-    };
-  } finally {
-    clearTimeout(timeout);
-    appState.proactiveRequestControllers.delete(characterId);
-  }
-}
-
-async function maybeSendProactive(characterId) {
-  if (document.visibilityState !== "visible") return;
-
-  const character = characterById(characterId);
-  const state = loadProactiveState(characterId);
-
-  if (state.dailyDate !== dateKey()) {
-    state.dailyDate = dateKey();
-    state.dailyCount = 0;
-    saveProactiveState(characterId, state);
-  }
-
-  if (Date.now() < Number(state.nextDueAt || 0)) return;
-
-  if (isQuietTime()) {
-    scheduleProactive(characterId, "normal");
-    return;
-  }
-
-  if (state.dailyCount >= character.proactive.dailyMax) {
-    state.nextDueAt = nextMorningTimestamp();
-    saveProactiveState(characterId, state);
-    return;
-  }
-
-  if (appState.proactiveRequestControllers.has(characterId)) return;
-
-  const latestUser = latestMessage(characterId, "mashiro");
-  const latestCharacter = latestMessage(characterId, characterId);
-  const latestAny = latestMessage(characterId);
-  const now = Date.now();
-
-  if (
-    latestUser &&
-    now - Date.parse(latestUser.createdAt) < character.proactive.recentUserCooldownMs
-  ) {
-    scheduleProactive(characterId, "retry");
-    return;
-  }
-
-  if (
-    latestAny?.senderId === characterId &&
-    latestCharacter &&
-    now - Date.parse(latestCharacter.createdAt) < character.proactive.recentCharacterCooldownMs
-  ) {
-    scheduleProactive(characterId, "normal");
-    return;
-  }
-
-  const apiEndpoint = getApiEndpoint();
-  const accessCode = getAccessCode();
-
-  if (!apiEndpoint || !accessCode) {
-    scheduleProactive(characterId, "retry");
-    return;
-  }
-
-  await warmBackend(apiEndpoint);
-
-  const showTyping =
-    appState.activeCharacterId === characterId &&
-    !chatScreen.hidden;
-
-  if (showTyping) setTyping(true, characterId);
-
-  try {
-    let result;
-    let lastError;
-
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        result = await callProactiveOnce(characterId, accessCode, apiEndpoint);
-        break;
-      } catch (error) {
-        lastError = error;
-        if (attempt === 1 || error?.code !== "temporary_error") throw error;
-        await sleep(1800);
-      }
-    }
-
-    if (showTyping) {
-      await sleep(800);
-      setTyping(false, characterId);
-    }
-
-    if (result?.send && result.message) {
-      addMessage(characterId, characterId, result.message, {
-        source: "proactive",
-        seenByUser: showTyping
-      });
-
-      state.lastSentAt = Date.now();
-      state.dailyCount += 1;
-      saveProactiveState(characterId, state);
-      scheduleProactive(characterId, "normal");
-    } else {
-      scheduleProactive(characterId, "retry");
-    }
-  } catch {
-    if (showTyping) setTyping(false, characterId);
-    scheduleProactive(characterId, "retry");
-  }
-}
-
-function startProactiveScheduler() {
-  clearInterval(appState.proactiveTimer);
-
-  const tick = () => {
-    for (const characterId of Object.keys(CHARACTERS)) {
-      maybeSendProactive(characterId);
-    }
-  };
-
-  setTimeout(tick, 1500);
-  appState.proactiveTimer = setInterval(tick, 60*1000);
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") setTimeout(tick, 700);
-  });
-
-  window.addEventListener("focus", () => setTimeout(tick, 700));
-}
-
-async function resetActiveConversation(clearMemory) {
-  const character = activeCharacter();
-  if (!character) return;
-
-  appState.currentRequestController?.abort();
-  const proactiveController = appState.proactiveRequestControllers.get(character.id);
-  proactiveController?.abort();
-
-  appState.isReplying = false;
-  setTyping(false, character.id);
-
-  saveMessages(character.id, character.seed());
-
-  if (clearMemory) {
-    localStorage.removeItem(memoryKey(character.id));
-  }
-
-  localStorage.removeItem(proactiveKey(character.id));
-
-  resetMemoryCheckbox.checked = false;
-  renderMessages();
-  renderTalkList();
-  autosizeInput();
-  setTimeout(() => scrollToBottom("auto"), 0);
-}
-
-function showCharacterSettings() {
-  const character = activeCharacter();
-  if (!character) return;
-
-  characterSettingsTitle.textContent = `${character.displayName}のアイコン`;
-  applyAvatar(settingsAvatar, character.id);
-  characterDialog.showModal();
-}
-
-composer.addEventListener("submit", (event) => {
-  event.preventDefault();
-  sendUserMessage();
-});
-
-messageInput.addEventListener("input", autosizeInput);
-messageInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-    event.preventDefault();
-    composer.requestSubmit();
-  }
-});
-
-backButton.addEventListener("click", () => history.back());
-
-resetButton.addEventListener("click", () => {
-  const character = activeCharacter();
-  if (!character) return;
-  resetTitle.textContent = `${character.displayName}とのトークを初期化`;
-  resetDialog.showModal();
-});
-
-confirmReset.addEventListener("click", () => {
-  resetActiveConversation(resetMemoryCheckbox.checked);
-});
-
-avatarButton.addEventListener("click", showCharacterSettings);
-
-chooseAvatarButton.addEventListener("click", () => avatarFileInput.click());
-
-avatarFileInput.addEventListener("change", async () => {
-  const character = activeCharacter();
-  const file = avatarFileInput.files?.[0];
-  avatarFileInput.value = "";
-
-  if (!character || !file) return;
-
-  try {
-    const dataUrl = await makeAvatarDataUrl(file);
-    setAvatarData(character.id, dataUrl);
-    applyAvatar(settingsAvatar, character.id);
-    applyAvatar(headerAvatar, character.id);
-    applyAvatar(typingAvatar, character.id);
-    renderTalkList();
-    renderMessages();
-    showToast("アイコンを変更しました");
-  } catch {
-    showToast("画像を読み込めませんでした");
-  }
-});
-
-resetAvatarButton.addEventListener("click", () => {
-  const character = activeCharacter();
-  if (!character) return;
-
-  setAvatarData(character.id, "");
-  applyAvatar(settingsAvatar, character.id);
-  applyAvatar(headerAvatar, character.id);
-  applyAvatar(typingAvatar, character.id);
-  renderTalkList();
-  renderMessages();
-  showToast("標準アイコンに戻しました");
-});
-
-window.addEventListener("popstate", (event) => {
-  const characterId = event.state?.characterId;
-
-  if (characterId && characterById(characterId)) {
-    openChat(characterId, false);
-  } else {
-    showTalkList(false);
-  }
-});
-
-function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) return;
-
-  let reloading = false;
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (reloading) return;
-    reloading = true;
-    location.reload();
-  });
-
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("./sw.js", { updateViaCache: "none" })
-      .then((registration) => registration.update())
-      .catch(() => {});
-  });
-}
+async function proactiveTick(){if(appState.proactiveBusy||document.visibilityState!=="visible")return;appState.proactiveBusy=true;try{const due=[];for(const id of Object.keys(CHARACTERS)){const s=loadDmProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"dm",id,due:s.nextDueAt});}for(const id of Object.keys(GROUPS)){const s=loadGroupProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"group",id,due:s.nextDueAt});}due.sort((a,b)=>a.due-b.due);const next=due[0];if(next){if(next.type==="dm")await maybeSendDmProactive(next.id);else await maybeSendGroupProactive(next.id);}}finally{appState.proactiveBusy=false;}}
+function startProactiveScheduler(){clearInterval(appState.proactiveTimer);setTimeout(proactiveTick,1500);appState.proactiveTimer=setInterval(proactiveTick,60*1000);document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")setTimeout(proactiveTick,700);});window.addEventListener("focus",()=>setTimeout(proactiveTick,700));}
+
+async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
+
+function showConversationSettings(){const conversation=activeConversation();if(!conversation)return;groupNameSection.hidden=conversation.type!=="group";if(conversation.type==="dm"){const c=characterById(conversation.characterId);characterSettingsTitle.textContent=`${c.displayName}のアイコン`;applyCharacterAvatar(settingsAvatar,c.id);}else{const g=groupById(conversation.groupId);characterSettingsTitle.textContent="グループ設定";applyGroupAvatar(settingsAvatar,g.id);groupNameInput.value=getGroupName(g.id);}characterDialog.showModal();}
+
+composer.addEventListener("submit",e=>{e.preventDefault();sendUserMessage();});
+messageInput.addEventListener("input",autosizeInput);messageInput.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();composer.requestSubmit();}});
+backButton.addEventListener("click",()=>history.back());
+resetButton.addEventListener("click",()=>{const conversation=activeConversation();if(!conversation)return;if(conversation.type==="dm"){const c=characterById(conversation.characterId);resetTitle.textContent=`${c.displayName}とのトークを初期化`;resetMemoryLabel.textContent="このキャラクターの長期記憶も削除する";}else{resetTitle.textContent="グループトークを初期化";resetMemoryLabel.textContent="このグループの共有記憶も削除する";}resetDialog.showModal();});
+confirmReset.addEventListener("click",()=>resetActiveConversation(resetMemoryCheckbox.checked));
+avatarButton.addEventListener("click",showConversationSettings);
+chooseAvatarButton.addEventListener("click",()=>avatarFileInput.click());
+avatarFileInput.addEventListener("change",async()=>{const conversation=activeConversation(),file=avatarFileInput.files?.[0];avatarFileInput.value="";if(!conversation||!file)return;try{const data=await makeAvatarDataUrl(file);if(conversation.type==="dm")setAvatarData(conversation.characterId,data);else setGroupAvatarData(conversation.groupId,data);showConversationSettingsRefresh();showToast("アイコンを変更しました");}catch{showToast("画像を読み込めませんでした");}});
+function showConversationSettingsRefresh(){const conversation=activeConversation();if(!conversation)return;applyConversationAvatar(settingsAvatar,conversation);applyConversationAvatar(headerAvatar,conversation);renderTalkList();renderMessages();}
+resetAvatarButton.addEventListener("click",()=>{const conversation=activeConversation();if(!conversation)return;if(conversation.type==="dm")setAvatarData(conversation.characterId,"");else setGroupAvatarData(conversation.groupId,"");showConversationSettingsRefresh();showToast("標準アイコンに戻しました");});
+groupNameInput.addEventListener("change",()=>{const conversation=activeConversation();if(conversation?.type!=="group")return;setGroupName(conversation.groupId,groupNameInput.value);groupNameInput.value=getGroupName(conversation.groupId);chatTitle.textContent=getGroupName(conversation.groupId);renderTalkList();showToast("グループ名を保存しました");});
+window.addEventListener("popstate",e=>{const conversationId=e.state?.conversationId;if(conversationId&&conversationById(conversationId))openConversation(conversationId,false);else showTalkList(false);});
+
+function registerServiceWorker(){if(!("serviceWorker" in navigator))return;let reloading=false;navigator.serviceWorker.addEventListener("controllerchange",()=>{if(reloading)return;reloading=true;location.reload();});window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(r=>r.update()).catch(()=>{}));}
 
 migrateLegacyNatsukiData();
-history.replaceState({ list: true }, "", location.pathname + location.search);
-renderTalkList();
-showTalkList(false);
-autosizeInput();
-registerServiceWorker();
-startProactiveScheduler();
+history.replaceState({list:true},"",location.pathname+location.search);
+renderTalkList();showTalkList(false);autosizeInput();registerServiceWorker();startProactiveScheduler();
+
 </script>
 </body>
 </html>

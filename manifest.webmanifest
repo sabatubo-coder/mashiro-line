@@ -1,7 +1,7 @@
 {
   "name": "ましろLINE（仮）",
   "short_name": "ましろLINE",
-  "description": "『ましろと夏樹の物語』の8人と個別トークできるPhase 2.1 PWA",
+  "description": "8人の個別トークと高校生6人グループLINEを使えるPhase 2.2 PWA",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
