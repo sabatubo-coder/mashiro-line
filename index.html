@@ -341,6 +341,21 @@ button { -webkit-tap-highlight-color: transparent; }
 .dialog-secondary { background: #eceef1; }
 .dialog-danger { background: #d94c4c; color: #fff; }
 
+.reset-memory-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: -4px 0 16px;
+  color: #565a61;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.reset-memory-option input {
+  width: 18px;
+  height: 18px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -402,7 +417,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .access-input:focus { border-color: rgba(77, 143, 91, .55); }
 
 </style>
-  <title>ましろLINE（仮） Phase 1.5 AI</title>
+  <title>ましろLINE（仮） Phase 1.6 長期記憶</title>
 </head>
 <body>
   <main class="app-shell" aria-label="夏樹とのトーク">
@@ -441,6 +456,10 @@ button { -webkit-tap-highlight-color: transparent; }
     <form method="dialog" class="dialog-card">
       <h2>トークを初期化しますか？</h2>
       <p>保存されている夏樹との履歴を削除して、最初の状態に戻します。</p>
+      <label class="reset-memory-option">
+        <input id="resetMemoryCheckbox" type="checkbox" />
+        <span>長期記憶も削除する</span>
+      </label>
       <div class="dialog-actions">
         <button value="cancel" class="dialog-secondary">キャンセル</button>
         <button id="confirmReset" value="default" class="dialog-danger">初期化</button>
@@ -478,6 +497,9 @@ button { -webkit-tap-highlight-color: transparent; }
 const STORAGE_KEY = "mashiroLine.phase1.natsuki.messages.v1";
 const ACCESS_CODE_KEY = "mashiroLine.phase1_5.accessCode.v1";
 const BACKEND_URL_KEY = "mashiroLine.phase1_5.backendUrl.v1";
+const MEMORY_STORAGE_KEY = "mashiroLine.phase1_6.natsuki.memories.v1";
+const MAX_LONG_TERM_MEMORIES = 40;
+const MAX_MEMORIES_SENT_TO_AI = 24;
 const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const messageList = document.getElementById("messageList");
@@ -489,6 +511,7 @@ const statusText = document.getElementById("statusText");
 const resetButton = document.getElementById("resetButton");
 const resetDialog = document.getElementById("resetDialog");
 const confirmReset = document.getElementById("confirmReset");
+const resetMemoryCheckbox = document.getElementById("resetMemoryCheckbox");
 const toast = document.getElementById("toast");
 const accessDialog = document.getElementById("accessDialog");
 const accessForm = document.getElementById("accessForm");
@@ -500,6 +523,7 @@ const backendUrlInput = document.getElementById("backendUrlInput");
 const backendCancel = document.getElementById("backendCancel");
 
 let messages = loadMessages();
+let longTermMemories = loadLongTermMemories();
 let isReplying = false;
 let currentRequestController = null;
 let toastTimer = null;
@@ -542,6 +566,140 @@ function loadMessages() {
 
 function saveMessages() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+}
+
+
+function loadLongTermMemories() {
+  try {
+    const raw = localStorage.getItem(MEMORY_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const list = Array.isArray(parsed) ? parsed : [];
+    return pruneLongTermMemories(list);
+  } catch {
+    return [];
+  }
+}
+
+function saveLongTermMemories() {
+  longTermMemories = pruneLongTermMemories(longTermMemories);
+  localStorage.setItem(MEMORY_STORAGE_KEY, JSON.stringify(longTermMemories));
+}
+
+function pruneLongTermMemories(list) {
+  const now = Date.now();
+
+  const valid = (Array.isArray(list) ? list : []).filter((memory) => {
+    if (!memory || typeof memory.text !== "string" || !memory.text.trim()) return false;
+    if (!memory.expiresAt) return true;
+    const expires = Date.parse(memory.expiresAt);
+    return Number.isNaN(expires) || expires > now;
+  });
+
+  valid.sort((a, b) => {
+    const importanceDiff = Number(b.importance || 1) - Number(a.importance || 1);
+    if (importanceDiff !== 0) return importanceDiff;
+    return Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0);
+  });
+
+  return valid.slice(0, MAX_LONG_TERM_MEMORIES);
+}
+
+function normalizeMemoryText(text) {
+  return String(text || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[。．.]+$/g, "")
+    .toLowerCase();
+}
+
+function memoryExpiryFromTTL(ttlDays) {
+  const days = Number(ttlDays);
+  if (!Number.isFinite(days) || days >= 3650) return null;
+  const date = new Date();
+  date.setDate(date.getDate() + Math.max(1, days));
+  return date.toISOString();
+}
+
+function mergeMemoryCandidates(candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return;
+
+  const nowIso = new Date().toISOString();
+
+  for (const candidate of candidates.slice(0, 2)) {
+    const text = String(candidate?.text || "").trim().slice(0, 240);
+    if (!text) continue;
+
+    const key = String(candidate?.key || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 80);
+
+    const category = ["event", "preference", "habit", "promise", "relationship", "school", "other"]
+      .includes(candidate?.category)
+      ? candidate.category
+      : "other";
+
+    const importance = [1, 2, 3].includes(Number(candidate?.importance))
+      ? Number(candidate.importance)
+      : 1;
+
+    const expiresAt = memoryExpiryFromTTL(candidate?.ttlDays);
+    const normalized = normalizeMemoryText(text);
+
+    let existing = null;
+
+    if (key) {
+      existing = longTermMemories.find((memory) => memory.key === key) || null;
+    }
+
+    if (!existing) {
+      existing = longTermMemories.find(
+        (memory) => normalizeMemoryText(memory.text) === normalized
+      ) || null;
+    }
+
+    if (existing) {
+      existing.key = key || existing.key || `memory_${makeId().replace(/[^a-z0-9]/gi, "_")}`;
+      existing.text = text;
+      existing.category = category;
+      existing.importance = Math.max(Number(existing.importance || 1), importance);
+      existing.updatedAt = nowIso;
+      existing.expiresAt = expiresAt;
+    } else {
+      longTermMemories.push({
+        id: makeId(),
+        key: key || `memory_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+        text,
+        category,
+        importance,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        expiresAt
+      });
+    }
+  }
+
+  saveLongTermMemories();
+}
+
+function memoriesForAPI() {
+  longTermMemories = pruneLongTermMemories(longTermMemories);
+  saveLongTermMemories();
+
+  return longTermMemories
+    .slice(0, MAX_MEMORIES_SENT_TO_AI)
+    .map((memory) => ({
+      id: memory.id,
+      key: memory.key,
+      text: memory.text,
+      category: memory.category,
+      importance: memory.importance,
+      createdAt: memory.createdAt,
+      updatedAt: memory.updatedAt,
+      expiresAt: memory.expiresAt
+    }));
 }
 
 function formatTime(iso) {
@@ -833,6 +991,7 @@ async function callNatsukiAIOnce(accessCode, apiEndpoint) {
       },
       body: JSON.stringify({
         messages: recentHistoryForAPI(),
+        memories: memoriesForAPI(),
         currentTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
         localTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -865,7 +1024,10 @@ async function callNatsukiAIOnce(accessCode, apiEndpoint) {
       throw error;
     }
 
-    return data.reply.trim();
+    return {
+      reply: data.reply.trim(),
+      memoryCandidates: Array.isArray(data.memoryCandidates) ? data.memoryCandidates : []
+    };
   } finally {
     clearTimeout(timeout);
     currentRequestController = null;
@@ -938,11 +1100,12 @@ async function scheduleAIReply() {
   const typingStart = Date.now();
 
   try {
-    const reply = await callNatsukiAI(accessCode, apiEndpoint);
+    const result = await callNatsukiAI(accessCode, apiEndpoint);
     const remaining = Math.max(0, minimumTypingMs - (Date.now() - typingStart));
     if (remaining) await new Promise((resolve) => setTimeout(resolve, remaining));
     setTyping(false);
-    addMessage("natsuki", reply, true);
+    addMessage("natsuki", result.reply, true);
+    mergeMemoryCandidates(result.memoryCandidates);
   } catch (error) {
     setTyping(false);
 
@@ -991,21 +1154,26 @@ resetButton.addEventListener("click", () => {
   if (typeof resetDialog.showModal === "function") {
     resetDialog.showModal();
   } else if (window.confirm("トーク履歴を初期化しますか？")) {
-    resetConversation();
+    resetConversation(false);
   }
 });
 
 confirmReset.addEventListener("click", () => {
-  resetConversation();
+  resetConversation(resetMemoryCheckbox.checked);
+  resetMemoryCheckbox.checked = false;
 });
 
-function resetConversation() {
+function resetConversation(clearMemory = false) {
   currentRequestController?.abort();
   currentRequestController = null;
   isReplying = false;
   setTyping(false);
   messages = seedMessages();
   saveMessages();
+  if (clearMemory) {
+    longTermMemories = [];
+    localStorage.removeItem(MEMORY_STORAGE_KEY);
+  }
   renderMessages();
   autosizeInput();
   setTimeout(() => scrollToBottom("auto"), 0);

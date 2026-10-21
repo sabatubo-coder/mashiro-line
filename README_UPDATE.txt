@@ -1,10 +1,9 @@
-ましろLINE Phase 1.5 AI版 v1.5.3
+ましろLINE Phase 1.6 長期記憶 Ver.1 - PWA更新
 
-変更点:
-- Replit Autoscale の休止復帰対策として、送信前に /health へ軽いウォームアップを実施
-- API通信のタイムアウトを25秒から45秒へ延長
-- ネットワークエラー・429・5xx・タイムアウト時に一度だけ自動再試行
-- AI返信待ち中は既存仕様どおり送信ボタンを無効化
-- Service Worker キャッシュを v4 に更新
+GitHub の sabatubo-coder/mashiro-line へ、この pwa フォルダ内のファイルをすべて上書きしてください。
+Commit後、数分待ってから Safari で:
+https://sabatubo-coder.github.io/mashiro-line/?v=160
+を一度開き、ホーム画面のPWAを完全終了して再起動してください。
 
-GitHub Pages の mashiro-line リポジトリへ全ファイルを上書きし、反映後に ?v=153 を付けたURLをSafariで一度開いてください。
+既存のトーク履歴は同じ STORAGE_KEY を使うため基本的に残ります。
+長期記憶はPhase 1.6導入後の会話から新しく蓄積されます。
