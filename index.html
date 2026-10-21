@@ -417,7 +417,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .access-input:focus { border-color: rgba(77, 143, 91, .55); }
 
 </style>
-  <title>ましろLINE（仮） Phase 1.7 自発メッセージ</title>
+  <title>ましろLINE（仮） Phase 1.7.1 自発メッセージ</title>
 </head>
 <body>
   <main class="app-shell" aria-label="夏樹とのトーク">
@@ -875,7 +875,8 @@ async function callProactiveAIOnce(accessCode, apiEndpoint) {
           lastNatsukiMessageAt: getLastNatsukiTimestamp()
             ? new Date(getLastNatsukiTimestamp()).toISOString()
             : null,
-          messagesToday: proactiveState.dailyCount
+          messagesToday: proactiveState.dailyCount,
+          forceFirstTest: !proactiveState.firstRunDone
         }
       }),
       signal: proactiveRequestController.signal,
@@ -978,12 +979,19 @@ async function maybeSendProactiveMessage() {
   const lastNatsukiAt = getLastNatsukiTimestamp();
   const lastMessage = messages[messages.length - 1];
 
-  if (lastUserAt && now - lastUserAt < PROACTIVE_RECENT_USER_COOLDOWN_MS) {
+  const isFirstVerification = !proactiveState.firstRunDone;
+
+  if (
+    !isFirstVerification &&
+    lastUserAt &&
+    now - lastUserAt < PROACTIVE_RECENT_USER_COOLDOWN_MS
+  ) {
     scheduleNextProactive("retry");
     return;
   }
 
   if (
+    !isFirstVerification &&
     lastMessage?.sender === "natsuki" &&
     lastNatsukiAt &&
     now - lastNatsukiAt < PROACTIVE_RECENT_NATSUKI_COOLDOWN_MS

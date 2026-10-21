@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase1-7-proactive-v1";
+const CACHE_NAME = "mashiro-line-phase1-7-1-proactive-first-test-fix";
 const ASSETS = [
   "./",
   "./index.html",
