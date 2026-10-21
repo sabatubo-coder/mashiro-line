@@ -365,8 +365,44 @@ button { -webkit-tap-highlight-color: transparent; }
   .topbar { padding-top: 9px; border-radius: 28px 28px 0 0; }
 }
 
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: calc(78px + env(safe-area-inset-bottom));
+  transform: translateX(-50%) translateY(8px);
+  max-width: calc(100% - 32px);
+  padding: 9px 13px;
+  border-radius: 12px;
+  background: rgba(30, 30, 32, .92);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+  z-index: 20;
+  text-align: center;
+}
+.toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.access-input {
+  width: 100%;
+  border: 1px solid rgba(60, 60, 67, .20);
+  border-radius: 12px;
+  padding: 11px 12px;
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+  margin-bottom: 14px;
+}
+.access-input:focus { border-color: rgba(77, 143, 91, .55); }
+
 </style>
-  <title>ましろLINE（仮）</title>
+  <title>ましろLINE（仮） Phase 1.5 AI</title>
 </head>
 <body>
   <main class="app-shell" aria-label="夏樹とのトーク">
@@ -392,6 +428,8 @@ button { -webkit-tap-highlight-color: transparent; }
       <span class="typing-label">夏樹が入力中…</span>
     </div>
 
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
     <form id="composer" class="composer" autocomplete="off">
       <label class="sr-only" for="messageInput">メッセージ</label>
       <textarea id="messageInput" rows="1" maxlength="500" placeholder="メッセージ" enterkeyhint="send"></textarea>
@@ -410,8 +448,37 @@ button { -webkit-tap-highlight-color: transparent; }
     </form>
   </dialog>
 
+  <dialog id="accessDialog" class="dialog">
+    <form id="accessForm" class="dialog-card">
+      <h2>AI接続コード</h2>
+      <p>バックエンドに設定した接続コードを入力してください。コードはこのiPhone内にだけ保存されます。</p>
+      <input id="accessCodeInput" class="access-input" type="password" autocomplete="off" maxlength="120" placeholder="接続コード" />
+      <div class="dialog-actions">
+        <button id="accessCancel" type="button" class="dialog-secondary">キャンセル</button>
+        <button type="submit" class="send-button" style="width:auto;height:auto;border-radius:10px;padding:11px;font-weight:600;">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+
+  <dialog id="backendDialog" class="dialog">
+    <form id="backendForm" class="dialog-card">
+      <h2>AIバックエンドURL</h2>
+      <p>Replitで公開したバックエンドのURLを入力してください。AIが生成する夏樹のメッセージは創作シミュレーション用で、本編の正式設定には自動反映されません。</p>
+      <input id="backendUrlInput" class="access-input" type="url" inputmode="url" autocomplete="off" maxlength="240" placeholder="https://xxxxx.replit.app" />
+      <div class="dialog-actions">
+        <button id="backendCancel" type="button" class="dialog-secondary">キャンセル</button>
+        <button type="submit" class="send-button" style="width:auto;height:auto;border-radius:10px;padding:11px;font-weight:600;">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="config.js"></script>
   <script>
 const STORAGE_KEY = "mashiroLine.phase1.natsuki.messages.v1";
+const ACCESS_CODE_KEY = "mashiroLine.phase1_5.accessCode.v1";
+const BACKEND_URL_KEY = "mashiroLine.phase1_5.backendUrl.v1";
+const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const messageList = document.getElementById("messageList");
 const composer = document.getElementById("composer");
@@ -422,10 +489,20 @@ const statusText = document.getElementById("statusText");
 const resetButton = document.getElementById("resetButton");
 const resetDialog = document.getElementById("resetDialog");
 const confirmReset = document.getElementById("confirmReset");
+const toast = document.getElementById("toast");
+const accessDialog = document.getElementById("accessDialog");
+const accessForm = document.getElementById("accessForm");
+const accessCodeInput = document.getElementById("accessCodeInput");
+const accessCancel = document.getElementById("accessCancel");
+const backendDialog = document.getElementById("backendDialog");
+const backendForm = document.getElementById("backendForm");
+const backendUrlInput = document.getElementById("backendUrlInput");
+const backendCancel = document.getElementById("backendCancel");
 
 let messages = loadMessages();
 let isReplying = false;
-let replyTimerIds = [];
+let currentRequestController = null;
+let toastTimer = null;
 
 function makeId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -567,6 +644,13 @@ function setTyping(visible) {
   if (visible) scrollToBottom();
 }
 
+function showToast(text, duration = 3200) {
+  clearTimeout(toastTimer);
+  toast.textContent = text;
+  toast.classList.add("is-visible");
+  toastTimer = setTimeout(() => toast.classList.remove("is-visible"), duration);
+}
+
 function autosizeInput() {
   messageInput.style.height = "auto";
   messageInput.style.height = `${Math.min(messageInput.scrollHeight, 120)}px`;
@@ -603,78 +687,217 @@ function markOutgoingAsRead() {
   }
 }
 
-function chooseMockReply(text) {
-  const t = text.trim();
-
-  if (/疲れ|つかれ|しんど|だる/.test(t)) {
-    return randomOf(["おつかれ。今日大変だった？", "そっか。おつかれ、ましろ", "今日なんかあった？"]);
-  }
-  if (/帰った|帰る|家/.test(t)) {
-    return randomOf(["そっか。オレももうちょいで帰る", "もう家？", "気をつけて帰れよー"]);
-  }
-  if (/暑|あつ/.test(t)) {
-    return randomOf(["今日やばかったな", "わかる。外出た瞬間むりってなった", "明日も暑いらしいぞ"]);
-  }
-  if (/昼|ごはん|飯|弁当|購買/.test(t)) {
-    return randomOf(["明日も屋上行く？", "オレまだなんか食べたい", "購買、今日混んでたよな"]);
-  }
-  if (/おはよ|おはよう/.test(t)) {
-    return randomOf(["おはよ", "おはよー。眠そう", "ちゃんと起きたじゃん"]);
-  }
-  if (/おやすみ|寝る/.test(t)) {
-    return randomOf(["ん、おやすみ", "また明日な", "ちゃんと寝ろよー"]);
-  }
-  if (/ありがとう|ありがと/.test(t)) {
-    return randomOf(["ん", "どーいたしまして", "それくらい別にいいって"]);
-  }
-  if (/ごめん|ごめ/.test(t)) {
-    return randomOf(["いや、全然", "気にしてないって", "そんな謝んなくていいよ"]);
-  }
-  if (/暇|ひま/.test(t)) {
-    return randomOf(["オレもちょっと暇", "じゃあなんか話す？", "珍しいな、ましろからそれ言うの"]);
-  }
-  if (/[？?]$/.test(t)) {
-    return randomOf(["たぶんそう", "んー、どうだろ", "オレはそう思うけど"]);
-  }
-
-  return randomOf([
-    "ん、わかる",
-    "そうなんだ",
-    "ましろ、それ今言う？笑",
-    "へー。ちょっと意外",
-    "そっか",
-    "それで？",
-    "なるほどなー"
-  ]);
+function getAccessCode() {
+  return localStorage.getItem(ACCESS_CODE_KEY) || "";
 }
 
-function randomOf(items) {
-  return items[Math.floor(Math.random() * items.length)];
+function askForAccessCode() {
+  return new Promise((resolve) => {
+    const existing = getAccessCode();
+    accessCodeInput.value = existing;
+
+    const cleanup = () => {
+      accessForm.removeEventListener("submit", onSubmit);
+      accessCancel.removeEventListener("click", onCancel);
+      accessDialog.removeEventListener("cancel", onCancel);
+    };
+
+    const onSubmit = (event) => {
+      event.preventDefault();
+      const code = accessCodeInput.value.trim();
+      if (!code) {
+        showToast("接続コードを入力してください");
+        return;
+      }
+      localStorage.setItem(ACCESS_CODE_KEY, code);
+      cleanup();
+      accessDialog.close();
+      resolve(code);
+    };
+
+    const onCancel = (event) => {
+      event?.preventDefault?.();
+      cleanup();
+      accessDialog.close();
+      resolve("");
+    };
+
+    accessForm.addEventListener("submit", onSubmit);
+    accessCancel.addEventListener("click", onCancel);
+    accessDialog.addEventListener("cancel", onCancel);
+    accessDialog.showModal();
+    setTimeout(() => accessCodeInput.focus(), 50);
+  });
 }
 
-function scheduleMockReply(userText) {
+
+function normalizeBackendUrl(value) {
+  let url = String(value || "").trim().replace(/\/+$/, "");
+  if (!/^https:\/\//i.test(url)) return "";
+  return `${url}/api/chat`;
+}
+
+function getApiEndpoint() {
+  const saved = localStorage.getItem(BACKEND_URL_KEY) || "";
+  if (saved) return normalizeBackendUrl(saved);
+  if (CONFIGURED_API_ENDPOINT) return CONFIGURED_API_ENDPOINT;
+  return "";
+}
+
+function askForBackendUrl() {
+  return new Promise((resolve) => {
+    const existing = localStorage.getItem(BACKEND_URL_KEY) || "";
+    backendUrlInput.value = existing;
+
+    const cleanup = () => {
+      backendForm.removeEventListener("submit", onSubmit);
+      backendCancel.removeEventListener("click", onCancel);
+      backendDialog.removeEventListener("cancel", onCancel);
+    };
+
+    const onSubmit = (event) => {
+      event.preventDefault();
+      const raw = backendUrlInput.value.trim();
+      if (!normalizeBackendUrl(raw)) {
+        showToast("https:// から始まる公開URLを入力してください");
+        return;
+      }
+      localStorage.setItem(BACKEND_URL_KEY, raw.replace(/\/+$/, ""));
+      cleanup();
+      backendDialog.close();
+      resolve(normalizeBackendUrl(raw));
+    };
+
+    const onCancel = (event) => {
+      event?.preventDefault?.();
+      cleanup();
+      backendDialog.close();
+      resolve("");
+    };
+
+    backendForm.addEventListener("submit", onSubmit);
+    backendCancel.addEventListener("click", onCancel);
+    backendDialog.addEventListener("cancel", onCancel);
+    backendDialog.showModal();
+    setTimeout(() => backendUrlInput.focus(), 50);
+  });
+}
+
+function recentHistoryForAPI() {
+  return messages.slice(-30).map((message) => ({
+    sender: message.sender,
+    text: message.text,
+    createdAt: message.createdAt
+  }));
+}
+
+async function callNatsukiAI(accessCode, apiEndpoint) {
+  currentRequestController = new AbortController();
+  const timeout = setTimeout(() => currentRequestController.abort(), 25000);
+
+  try {
+    const response = await fetch(apiEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-App-Code": accessCode
+      },
+      body: JSON.stringify({
+        messages: recentHistoryForAPI(),
+        localTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      }),
+      signal: currentRequestController.signal,
+      cache: "no-store"
+    });
+
+    let data = {};
+    try { data = await response.json(); } catch {}
+
+    if (response.status === 401 && data?.error === "invalid_app_code") {
+      localStorage.removeItem(ACCESS_CODE_KEY);
+      const error = new Error("invalid_app_code");
+      error.code = "invalid_app_code";
+      throw error;
+    }
+
+    if (!response.ok || typeof data?.reply !== "string" || !data.reply.trim()) {
+      const error = new Error(data?.error || "api_error");
+      error.code = data?.error || "api_error";
+      throw error;
+    }
+
+    return data.reply.trim();
+  } finally {
+    clearTimeout(timeout);
+    currentRequestController = null;
+  }
+}
+
+async function scheduleAIReply() {
   isReplying = true;
   autosizeInput();
 
-  const readDelay = 450 + Math.random() * 500;
-  const typingDelay = readDelay + 500 + Math.random() * 700;
-  const replyText = chooseMockReply(userText);
-  const typingDuration = 900 + Math.min(replyText.length * 55, 2200) + Math.random() * 700;
+  let apiEndpoint = getApiEndpoint();
+  if (!apiEndpoint) {
+    apiEndpoint = await askForBackendUrl();
+    if (!apiEndpoint) {
+      isReplying = false;
+      autosizeInput();
+      showToast("AIバックエンド設定をキャンセルしました");
+      return;
+    }
+  }
 
-  replyTimerIds.push(setTimeout(() => {
-    markOutgoingAsRead();
-  }, readDelay));
+  let accessCode = getAccessCode();
+  if (!accessCode) {
+    accessCode = await askForAccessCode();
+    if (!accessCode) {
+      isReplying = false;
+      autosizeInput();
+      showToast("AI接続をキャンセルしました");
+      return;
+    }
+  }
 
-  replyTimerIds.push(setTimeout(() => {
-    setTyping(true);
-  }, typingDelay));
+  const readDelay = 450 + Math.random() * 450;
+  await new Promise((resolve) => setTimeout(resolve, readDelay));
+  markOutgoingAsRead();
 
-  replyTimerIds.push(setTimeout(() => {
+  const typingDelay = 350 + Math.random() * 550;
+  await new Promise((resolve) => setTimeout(resolve, typingDelay));
+  setTyping(true);
+
+  const minimumTypingMs = 900;
+  const typingStart = Date.now();
+
+  try {
+    const reply = await callNatsukiAI(accessCode, apiEndpoint);
+    const remaining = Math.max(0, minimumTypingMs - (Date.now() - typingStart));
+    if (remaining) await new Promise((resolve) => setTimeout(resolve, remaining));
     setTyping(false);
-    addMessage("natsuki", replyText, true);
+    addMessage("natsuki", reply, true);
+  } catch (error) {
+    setTyping(false);
+
+    if (error?.code === "invalid_app_code") {
+      showToast("接続コードが違います。もう一度入力してください", 4200);
+      setTimeout(() => askForAccessCode(), 250);
+    } else if (error?.name === "AbortError") {
+      showToast("夏樹への接続がタイムアウトしました", 4200);
+    } else if (error?.code === "server_not_configured") {
+      showToast("AIバックエンドの設定がまだ完了していません", 4200);
+    } else if (error?.code === "origin_not_allowed") {
+      showToast("バックエンド側の接続元設定を確認してください", 4200);
+    } else if (error?.code === "rate_limited") {
+      showToast("少し送信が多いみたい。少し待ってもう一度試してください", 4200);
+    } else {
+      showToast("AIに接続できませんでした。少し待ってもう一度試してください", 4200);
+    }
+  } finally {
     isReplying = false;
     autosizeInput();
-  }, typingDelay + typingDuration));
+  }
 }
 
 composer.addEventListener("submit", (event) => {
@@ -687,7 +910,7 @@ composer.addEventListener("submit", (event) => {
   addMessage("mashiro", text, false);
   messageInput.value = "";
   autosizeInput();
-  scheduleMockReply(text);
+  scheduleAIReply();
 });
 
 messageInput.addEventListener("input", autosizeInput);
@@ -711,8 +934,8 @@ confirmReset.addEventListener("click", () => {
 });
 
 function resetConversation() {
-  for (const id of replyTimerIds) clearTimeout(id);
-  replyTimerIds = [];
+  currentRequestController?.abort();
+  currentRequestController = null;
   isReplying = false;
   setTyping(false);
   messages = seedMessages();
@@ -736,9 +959,7 @@ function registerServiceWorker() {
       navigator.serviceWorker
         .register("./sw.js", { updateViaCache: "none" })
         .then((registration) => registration.update())
-        .catch(() => {
-          // HTTPS/localhost 以外では登録できないため、UIはそのまま利用する。
-        });
+        .catch(() => {});
     });
   }
 }
