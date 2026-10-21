@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase1-7-2-proactive-state-reset";
+const CACHE_NAME = "mashiro-line-phase2-0-multichar-v1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -16,7 +16,9 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
+    )
   );
   self.clients.claim();
 });

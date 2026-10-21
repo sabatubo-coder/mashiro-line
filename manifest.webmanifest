@@ -1,7 +1,7 @@
 {
   "name": "ましろLINE（仮）",
   "short_name": "ましろLINE",
-  "description": "『ましろと夏樹の物語』の夏樹と会話し、長期記憶と自発メッセージを使うPhase 1.7.2 PWA",
+  "description": "『ましろと夏樹の物語』の登場人物と会話するPhase 2.0 複数キャラクター対応PWA",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
