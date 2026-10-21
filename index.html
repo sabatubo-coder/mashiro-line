@@ -738,9 +738,11 @@ function normalizeBackendUrl(value) {
 }
 
 function getApiEndpoint() {
+  // 配布済みの設定URLを最優先する。過去バージョンで保存された古いURLが
+  // localStorageに残っていても、現在のバックエンドへ接続する。
+  if (CONFIGURED_API_ENDPOINT) return CONFIGURED_API_ENDPOINT;
   const saved = localStorage.getItem(BACKEND_URL_KEY) || "";
   if (saved) return normalizeBackendUrl(saved);
-  if (CONFIGURED_API_ENDPOINT) return CONFIGURED_API_ENDPOINT;
   return "";
 }
 
@@ -800,11 +802,11 @@ async function callNatsukiAI(accessCode, apiEndpoint) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-App-Code": accessCode
+        "X-App-Access-Code": accessCode
       },
       body: JSON.stringify({
         messages: recentHistoryForAPI(),
-        localTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
+        currentTime: new Date().toLocaleString("ja-JP", { dateStyle: "full", timeStyle: "short" }),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       }),
       signal: currentRequestController.signal,
@@ -814,7 +816,7 @@ async function callNatsukiAI(accessCode, apiEndpoint) {
     let data = {};
     try { data = await response.json(); } catch {}
 
-    if (response.status === 401 && data?.error === "invalid_app_code") {
+    if (response.status === 401) {
       localStorage.removeItem(ACCESS_CODE_KEY);
       const error = new Error("invalid_app_code");
       error.code = "invalid_app_code";
@@ -822,8 +824,14 @@ async function callNatsukiAI(accessCode, apiEndpoint) {
     }
 
     if (!response.ok || typeof data?.reply !== "string" || !data.reply.trim()) {
-      const error = new Error(data?.error || "api_error");
-      error.code = data?.error || "api_error";
+      const rawError = String(data?.error || "api_error");
+      const normalized = rawError.toLowerCase();
+      let code = "api_error";
+      if (response.status === 403 || normalized.includes("origin")) code = "origin_not_allowed";
+      else if (response.status === 503 || normalized.includes("configured")) code = "server_not_configured";
+      else if (response.status === 429 || normalized.includes("rate")) code = "rate_limited";
+      const error = new Error(rawError);
+      error.code = code;
       throw error;
     }
 

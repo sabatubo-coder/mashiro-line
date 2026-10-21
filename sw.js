@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase1-5-ai-replit-v2";
+const CACHE_NAME = "mashiro-line-phase1-5-ai-replit-v3";
 const ASSETS = [
   "./",
   "./index.html",
@@ -35,6 +35,21 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => caches.match("./index.html"))
+    );
+    return;
+  }
+
+  if (url.pathname.endsWith("/config.js")) {
+    event.respondWith(
+      fetch(event.request, { cache: "no-store" })
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
     );
     return;
   }

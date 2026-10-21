@@ -1,16 +1,12 @@
-ましろLINE Phase 1.5 AI版 GitHub Pages更新用
+ましろLINE Phase 1.5 AI版 v1.5.1 修正版
 
-GitHubの sabatubo-coder/mashiro-line リポジトリへ、このフォルダ内の以下を上書きしてください。
-- index.html
-- config.js
-- sw.js
-- manifest.webmanifest
-- icon-192.png
-- icon-512.png
-- apple-touch-icon.png
+修正点:
+- Replitバックエンドへ送る接続コードのヘッダー名を修正
+- 現在時刻フィールドをバックエンド仕様に合わせて修正
+- 401/403/503等のエラー処理をバックエンド仕様に合わせて修正
+- 過去に保存された古いバックエンドURLより、config.jsの現在URLを優先
+- Service Workerキャッシュをv3へ更新
+- config.jsはネットワーク最新版を優先
 
-AIバックエンドURLは config.js に設定済みです。
-初回送信時は APP_ACCESS_CODE の入力だけが求められます。
-OPENAI_API_KEY はこのPWAには含まれていません。
-
-既存会話履歴は同じlocalStorageキーを使用するため、通常は保持されます。
+GitHub Pagesの既存ファイルをすべて上書きしてCommitしてください。
+反映後はSafariで ?v=151 を付けたURLを一度開き、その後ホーム画面のPWAを完全終了して再起動してください。
