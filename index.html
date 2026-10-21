@@ -793,9 +793,36 @@ function recentHistoryForAPI() {
   }));
 }
 
-async function callNatsukiAI(accessCode, apiEndpoint) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function healthEndpointFor(apiEndpoint) {
+  return String(apiEndpoint || "").replace(/\/api\/chat(?:\?.*)?$/, "/health");
+}
+
+async function warmBackend(apiEndpoint) {
+  const healthEndpoint = healthEndpointFor(apiEndpoint);
+  if (!healthEndpoint || healthEndpoint === apiEndpoint) return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    await fetch(healthEndpoint, {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal
+    });
+  } catch {
+    // Replit がスリープ復帰中でも、次の本リクエスト側で再試行する。
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function callNatsukiAIOnce(accessCode, apiEndpoint) {
   currentRequestController = new AbortController();
-  const timeout = setTimeout(() => currentRequestController.abort(), 25000);
+  const timeout = setTimeout(() => currentRequestController.abort(), 45000);
 
   try {
     const response = await fetch(apiEndpoint, {
@@ -825,14 +852,16 @@ async function callNatsukiAI(accessCode, apiEndpoint) {
     }
 
     if (!response.ok || typeof data?.reply !== "string" || !data.reply.trim()) {
-      const rawError = String(data?.error || "api_error");
+      const rawError = String(data?.error || `http_${response.status}`);
       const normalized = rawError.toLowerCase();
       let code = "api_error";
       if (response.status === 403 || normalized.includes("origin")) code = "origin_not_allowed";
-      else if (response.status === 503 || normalized.includes("configured")) code = "server_not_configured";
+      else if (normalized.includes("configured")) code = "server_not_configured";
       else if (response.status === 429 || normalized.includes("rate")) code = "rate_limited";
+      else if ([500, 502, 503, 504].includes(response.status)) code = "temporary_error";
       const error = new Error(rawError);
       error.code = code;
+      error.status = response.status;
       throw error;
     }
 
@@ -841,6 +870,31 @@ async function callNatsukiAI(accessCode, apiEndpoint) {
     clearTimeout(timeout);
     currentRequestController = null;
   }
+}
+
+async function callNatsukiAI(accessCode, apiEndpoint) {
+  let lastError;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await callNatsukiAIOnce(accessCode, apiEndpoint);
+    } catch (error) {
+      lastError = error;
+      const retryable =
+        error?.name === "AbortError" ||
+        error instanceof TypeError ||
+        error?.code === "temporary_error" ||
+        error?.code === "rate_limited";
+
+      if (!retryable || attempt === 1) throw error;
+
+      // Autoscale の起動直後や一時的なゲートウェイエラーに備えて一度だけ再試行する。
+      await warmBackend(apiEndpoint);
+      await sleep(1800);
+    }
+  }
+
+  throw lastError;
 }
 
 async function scheduleAIReply() {
@@ -869,6 +923,9 @@ async function scheduleAIReply() {
     }
   }
 
+  // Replit Autoscale が休止していた場合に備えて、先に軽い health check で起こす。
+  await warmBackend(apiEndpoint);
+
   const readDelay = 450 + Math.random() * 450;
   await new Promise((resolve) => setTimeout(resolve, readDelay));
   markOutgoingAsRead();
@@ -892,8 +949,8 @@ async function scheduleAIReply() {
     if (error?.code === "invalid_app_code") {
       showToast("接続コードが違います。もう一度入力してください", 4200);
       setTimeout(() => askForAccessCode(), 250);
-    } else if (error?.name === "AbortError") {
-      showToast("夏樹への接続がタイムアウトしました", 4200);
+    } else if (error?.name === "AbortError" || error?.code === "temporary_error") {
+      showToast("一時的に接続が不安定でした。少し待ってもう一度試してください", 4200);
     } else if (error?.code === "server_not_configured") {
       showToast("AIバックエンドの設定がまだ完了していません", 4200);
     } else if (error?.code === "origin_not_allowed") {
