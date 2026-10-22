@@ -1,2 +1,2 @@
-// ましろLINE Phase 2.4.1 夏樹の自発通知・強制テスト
+// ましろLINE Phase 2.4.3 自発通知スケジューラ診断
 window.MASHIROLINE_API_ENDPOINT = "https://mashiro-line-backend-importzip--misomimizu.replit.app/api/chat";

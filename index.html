@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.4.1</title>
+  <title>ましろLINE（仮） Phase 2.4.3</title>
   <style>
 :root {
   color-scheme: light;
@@ -962,6 +962,65 @@ button { -webkit-tap-highlight-color: transparent; }
   line-height: 1.45;
 }
 
+.notification-diagnostics-wrap {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fcfcfd;
+}
+
+.notification-diagnostics-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.notification-diagnostic-button {
+  min-height: 42px;
+  border: 1px solid #d7dbdf;
+  border-radius: 11px;
+  background: #fff;
+  color: #33363b;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.notification-diagnostic-button.primary {
+  background: #eef5f0;
+  color: #386945;
+  border-color: #d4e5d9;
+}
+
+.notification-diagnostic-button:disabled {
+  opacity: .45;
+}
+
+.notification-diagnostics-panel {
+  margin-top: 10px;
+  padding: 11px 12px;
+  border-radius: 11px;
+  background: #f1f3f5;
+  font-size: 11px;
+  line-height: 1.58;
+  color: #555a61;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notification-diagnostics-panel.good {
+  background: #eaf6ed;
+  color: #356344;
+}
+
+.notification-diagnostics-panel.warn {
+  background: #fff3df;
+  color: #795721;
+}
+
+.notification-diagnostics-panel.error {
+  background: #fdecec;
+  color: #8b3f3f;
+}
+
 .notification-setting-row {
   min-height: 52px;
   display: grid;
@@ -1198,7 +1257,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.4-notifications-proactive-v1";
+const PUSH_VERSION = "phase2.4.3-push-scheduler-diagnostics-v1";
 
 
 const SELF_PROFILE = {
@@ -1261,7 +1320,9 @@ const appState = {
   profileTarget: null,
   pushSyncTimer: null,
   pushBridgeTimer: null,
-  pushBridgeBusy: false
+  pushBridgeBusy: false,
+  pushDiagnosticsData: null,
+  pushDiagnosticsBusy: false
 };
 
 const listScreen = document.getElementById("listScreen");
@@ -1692,6 +1753,7 @@ function endpointFor(apiEndpoint,kind){
   if(kind==="pushUnregister")return `${base}/api/push/unregister`;
   if(kind==="pushTest")return `${base}/api/push/test`;
   if(kind==="pushNatsukiProactiveTest")return `${base}/api/push/test-proactive-natsuki`;
+  if(kind==="pushDiagnostics")return `${base}/api/push/diagnostics`;
   if(kind==="pushRunDue")return `${base}/api/push/run-due`;
   return apiEndpoint;
 }
@@ -1969,6 +2031,167 @@ async function sendForcedNatsukiProactiveTest(){
   }
 }
 
+
+function formatDiagnosticTime(iso){
+  if(!iso)return "なし";
+  try{
+    return new Date(iso).toLocaleString("ja-JP",{
+      month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit"
+    });
+  }catch{return String(iso);}
+}
+
+function formatDiagnosticDuration(ms){
+  const value=Math.max(0,Number(ms||0));
+  if(value<1000)return "0秒";
+  const minutes=Math.floor(value/60000);
+  const hours=Math.floor(minutes/60);
+  const remainMinutes=minutes%60;
+  if(hours>0)return `${hours}時間${remainMinutes}分`;
+  return `${minutes}分`;
+}
+
+function pushDiagnosticsText(data){
+  if(!data)return "まだ診断していません。";
+  if(data?.error)return `診断エラー: ${data.error}`;
+  if(data.registered===false)return "このiPhoneのPush登録がBackendに見つかりません。";
+
+  const n=data.natsuki;
+  const scheduler=data.scheduler||{};
+  if(!data.snapshotHasNatsuki||!n){
+    return [
+      "Push登録: あり",
+      "夏樹の通知スナップショット: なし",
+      "PWAから一度通知同期を行ってください。"
+    ].join("\n");
+  }
+
+  const reasons=Array.isArray(n.reasons)&&n.reasons.length?n.reasons.join(" / "):"なし";
+  const lines=[
+    `現在の判定: ${n.eligible?"送信対象（eligible）":"まだ送信しない"}`,
+    `理由: ${reasons}`,
+    `次回予定: ${formatDiagnosticTime(n.nextDueAtIso)}`,
+    `予定まで: ${n.msUntilDue>0?formatDiagnosticDuration(n.msUntilDue):"予定時刻を経過済み"}`,
+    `最終自発送信: ${formatDiagnosticTime(n.lastSentAtIso)}`,
+    `今日の送信数: ${n.dailyCount} / ${n.dailyMax}`,
+    `ましろ最終発言: ${formatDiagnosticTime(n.latestUserAt)}`,
+    `夏樹最終発言: ${formatDiagnosticTime(n.latestCharacterAt)}`,
+    `ましろ発言クールダウン残り: ${formatDiagnosticDuration(n.recentUserRemainingMs)}`,
+    `夏樹連投防止残り: ${formatDiagnosticDuration(n.recentCharacterRemainingMs)}`,
+    `通知しない時間帯: ${n.quietNow?"はい":"いいえ"}`,
+    "",
+    `Backend定期判定回数: ${scheduler.runCount??0}`,
+    `最後の判定元: ${scheduler.lastSource||"なし"}`,
+    `最後の判定開始: ${formatDiagnosticTime(scheduler.lastRunStartedAt)}`,
+    `最後の判定終了: ${formatDiagnosticTime(scheduler.lastRunFinishedAt)}`,
+    `最後の判定結果: ${scheduler.lastResult?JSON.stringify(scheduler.lastResult):"なし"}`,
+    `最後のエラー: ${scheduler.lastError||"なし"}`,
+    `端末スナップショット更新: ${formatDiagnosticTime(data.deviceUpdatedAt)}`,
+    `未取得Pushイベント: ${data.pendingEventCount??0}`
+  ];
+  return lines.join("\n");
+}
+
+async function fetchPushDiagnostics({render=true}={}){
+  if(!pushNotificationsEnabled()){
+    showToast("先に通知を有効にしてください");
+    return null;
+  }
+  if(appState.pushDiagnosticsBusy)return appState.pushDiagnosticsData;
+
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
+  if(!apiEndpoint||!accessCode)return null;
+
+  appState.pushDiagnosticsBusy=true;
+  try{
+    const url=`${endpointFor(apiEndpoint,"pushDiagnostics")}?deviceId=${encodeURIComponent(getPushDeviceId())}`;
+    const data=await fetchJsonWithRetry(url,{
+      method:"GET",
+      headers:{"X-App-Code":accessCode}
+    },0);
+    appState.pushDiagnosticsData=data;
+    if(render)renderSettingsScreen();
+    return data;
+  }catch(error){
+    appState.pushDiagnosticsData={error:String(error?.message||"診断に失敗しました")};
+    if(render)renderSettingsScreen();
+    return appState.pushDiagnosticsData;
+  }finally{
+    appState.pushDiagnosticsBusy=false;
+  }
+}
+
+async function runSchedulerDiagnosticOnce(){
+  if(!pushNotificationsEnabled()){
+    showToast("先に通知を有効にしてください");
+    return;
+  }
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
+  if(!apiEndpoint||!accessCode)return;
+
+  try{
+    showToast("通常スケジューラを1回実行しています…",3000);
+    const result=await fetchJsonWithRetry(endpointFor(apiEndpoint,"pushRunDue"),{
+      method:"POST",
+      headers:pushAuthHeaders(accessCode),
+      body:JSON.stringify({source:"diagnostic-button"})
+    },0);
+
+    await sleep(500);
+    await pullPendingPushMessages();
+    const data=await fetchPushDiagnostics({render:false});
+    if(data){
+      data.manualRunResult=result;
+      appState.pushDiagnosticsData=data;
+    }
+    renderSettingsScreen();
+
+    if(Number(result?.sent||0)>0){
+      showToast("通常スケジューラから通知を送信しました",4000);
+    }else{
+      showToast("通常スケジューラを実行しました。診断結果を確認してください",4500);
+    }
+  }catch(error){
+    appState.pushDiagnosticsData={error:String(error?.message||"スケジューラ実行に失敗しました")};
+    renderSettingsScreen();
+    showToast("通常スケジューラの実行に失敗しました",4500);
+  }
+}
+
+function buildPushDiagnosticsBlock(){
+  const wrap=document.createElement("div");
+  wrap.className="notification-diagnostics-wrap";
+
+  const actions=document.createElement("div");
+  actions.className="notification-diagnostics-actions";
+
+  const check=document.createElement("button");
+  check.type="button";
+  check.className="notification-diagnostic-button";
+  check.textContent=appState.pushDiagnosticsBusy?"診断中…":"状態を診断";
+  check.disabled=!pushNotificationsEnabled()||appState.pushDiagnosticsBusy;
+  check.addEventListener("click",()=>fetchPushDiagnostics());
+
+  const run=document.createElement("button");
+  run.type="button";
+  run.className="notification-diagnostic-button primary";
+  run.textContent="通常判定を1回実行";
+  run.disabled=!pushNotificationsEnabled()||appState.pushDiagnosticsBusy;
+  run.addEventListener("click",runSchedulerDiagnosticOnce);
+
+  actions.append(check,run);
+
+  const panel=document.createElement("div");
+  const data=appState.pushDiagnosticsData;
+  const eligible=Boolean(data?.natsuki?.eligible);
+  const hasError=Boolean(data?.error||data?.registered===false);
+  panel.className=`notification-diagnostics-panel${hasError?" error":eligible?" good":data?" warn":""}`;
+  panel.textContent=pushDiagnosticsText(data);
+
+  wrap.append(actions,panel);
+  return wrap;
+}
+
 async function syncPushSnapshotNow(){
   if(!pushNotificationsEnabled())return;
   const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
@@ -2149,6 +2372,7 @@ function buildNotificationSettingsSection(){
   const forcedNote=document.createElement("div");forcedNote.className="notification-forced-test-note";forcedNote.textContent="自然な待ち時間を無視し、このテスト時だけ夏樹から実際の自発メッセージを1通生成します。通常の送信回数・次回予定には影響しません。";
   forcedWrap.append(forcedButton,forcedNote);
   card.appendChild(forcedWrap);
+  card.appendChild(buildPushDiagnosticsBlock());
 
   const enabled=pushNotificationsEnabled();
   card.appendChild(createNotificationToggle("個別トーク","キャラクターからの自発メッセージ",settings.dmEnabled,(value)=>{const s=getPushSettings();s.dmEnabled=value;savePushSettings(s);renderSettingsScreen();},!enabled));
