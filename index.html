@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.4.3</title>
+  <title>ましろLINE（仮） Phase 2.4.4</title>
   <style>
 :root {
   color-scheme: light;
@@ -1257,7 +1257,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.4.3-push-scheduler-diagnostics-v1";
+const PUSH_VERSION = "phase2.4.4-scheduler-state-authority-fix-v1";
 
 
 const SELF_PROFILE = {
@@ -1865,8 +1865,7 @@ function buildPushSnapshot(){
     dm[id]={
       conversationId:c.conversationId,
       messages:recentHistoryForAPI(c.conversationId),
-      memories:memoriesForAPI(id),
-      state:loadDmProactiveState(id)
+      memories:memoriesForAPI(id)
     };
   }
 
@@ -1876,8 +1875,7 @@ function buildPushSnapshot(){
     group[id]={
       conversationId:g.conversationId,
       messages:recentHistoryForAPI(g.conversationId),
-      sharedMemories:groupMemoriesForAPI(id),
-      state:loadGroupProactiveState(id)
+      sharedMemories:groupMemoriesForAPI(id)
     };
   }
 
@@ -2073,6 +2071,8 @@ function pushDiagnosticsText(data){
     `次回予定: ${formatDiagnosticTime(n.nextDueAtIso)}`,
     `予定まで: ${n.msUntilDue>0?formatDiagnosticDuration(n.msUntilDue):"予定時刻を経過済み"}`,
     `最終自発送信: ${formatDiagnosticTime(n.lastSentAtIso)}`,
+    `最後の通常送信判定: ${formatDiagnosticTime(n.lastAttemptAtIso)}`,
+    `最後の判定内容: ${n.lastAttemptDecision==="sent"?"送信":n.lastAttemptDecision==="deferred_by_model"?"AIが今回は見送り":"なし"}`,
     `今日の送信数: ${n.dailyCount} / ${n.dailyMax}`,
     `ましろ最終発言: ${formatDiagnosticTime(n.latestUserAt)}`,
     `夏樹最終発言: ${formatDiagnosticTime(n.latestCharacterAt)}`,
@@ -2103,6 +2103,8 @@ async function fetchPushDiagnostics({render=true}={}){
   if(!apiEndpoint||!accessCode)return null;
 
   appState.pushDiagnosticsBusy=true;
+  if(render)renderSettingsScreen();
+
   try{
     const url=`${endpointFor(apiEndpoint,"pushDiagnostics")}?deviceId=${encodeURIComponent(getPushDeviceId())}`;
     const data=await fetchJsonWithRetry(url,{
@@ -2110,15 +2112,14 @@ async function fetchPushDiagnostics({render=true}={}){
       headers:{"X-App-Code":accessCode}
     },0);
     appState.pushDiagnosticsData=data;
-    if(render)renderSettingsScreen();
-    return data;
   }catch(error){
     appState.pushDiagnosticsData={error:String(error?.message||"診断に失敗しました")};
-    if(render)renderSettingsScreen();
-    return appState.pushDiagnosticsData;
   }finally{
     appState.pushDiagnosticsBusy=false;
+    if(render)renderSettingsScreen();
   }
+
+  return appState.pushDiagnosticsData;
 }
 
 async function runSchedulerDiagnosticOnce(){
