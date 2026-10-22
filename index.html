@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.4.4</title>
+  <title>ましろLINE（仮） Phase 2.5</title>
   <style>
 :root {
   color-scheme: light;
@@ -1257,7 +1257,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.4.4-scheduler-state-authority-fix-v1";
+const PUSH_VERSION = "phase2.5-natsuki-life-topic-dedup-v1";
 
 
 const SELF_PROFILE = {
@@ -2064,7 +2064,36 @@ function pushDiagnosticsText(data){
     ].join("\n");
   }
 
-  const reasons=Array.isArray(n.reasons)&&n.reasons.length?n.reasons.join(" / "):"なし";
+  const reasonLabel=(reason)=>({
+    blocked_by_sleep:"就寝中",
+    blocked_by_school:"学校・授業時間",
+    blocked_by_soccer:"サッカー部活動中",
+    blocked_by_with_mashiro:"ましろと対面中の可能性が高い",
+    blocked_by_life_model:"生活モデル上、今は送信しない"
+  }[reason]||reason);
+  const decisionLabel=(decision)=>({
+    sent:"送信",
+    deferred_by_model:"AIが今回は見送り",
+    blocked_by_topic_repeat:"直近と同じ話題のため見送り",
+    blocked_by_sleep:"就寝中のため見送り",
+    blocked_by_school:"学校時間のため見送り",
+    blocked_by_soccer:"サッカー部活動中のため見送り",
+    blocked_by_with_mashiro:"ましろと対面中の可能性が高いため見送り"
+  }[decision]||decision||"なし");
+  const activityLabel=(activity)=>({
+    sleeping:"就寝中", morning_home:"朝・自宅", with_mashiro_commute:"ましろと登校中",
+    school:"学校・授業時間", soccer_club:"サッカー部活動中",
+    after_school_with_mashiro:"ましろと下校中の可能性が高い",
+    bath_or_dinner:"帰宅・入浴・夕食", free_evening:"夜の自由時間",
+    before_sleep:"就寝前", holiday_morning:"休日の朝", holiday_free:"休日・自由時間"
+  }[activity]||activity||"不明");
+  const dayTypeLabel=(dayType)=>({
+    school_club_day:"学校＋サッカー部", school_free_day:"学校・部活なし", holiday_free:"休日・予定情報なし"
+  }[dayType]||dayType||"不明");
+
+  const reasons=Array.isArray(n.reasons)&&n.reasons.length?n.reasons.map(reasonLabel).join(" / "):"なし";
+  const life=n.life||{};
+  const recentTopics=Array.isArray(n.recentProactiveHistory)?n.recentProactiveHistory:[];
   const lines=[
     `現在の判定: ${n.eligible?"送信対象（eligible）":"まだ送信しない"}`,
     `理由: ${reasons}`,
@@ -2072,8 +2101,18 @@ function pushDiagnosticsText(data){
     `予定まで: ${n.msUntilDue>0?formatDiagnosticDuration(n.msUntilDue):"予定時刻を経過済み"}`,
     `最終自発送信: ${formatDiagnosticTime(n.lastSentAtIso)}`,
     `最後の通常送信判定: ${formatDiagnosticTime(n.lastAttemptAtIso)}`,
-    `最後の判定内容: ${n.lastAttemptDecision==="sent"?"送信":n.lastAttemptDecision==="deferred_by_model"?"AIが今回は見送り":"なし"}`,
+    `最後の判定内容: ${decisionLabel(n.lastAttemptDecision)}`,
     `今日の送信数: ${n.dailyCount} / ${n.dailyMax}`,
+    "",
+    `夏樹の現在状態: ${activityLabel(life.activity)}`,
+    `今日のタイプ: ${dayTypeLabel(life.dayType)}`,
+    `LINEしやすさ: ${life.availabilityScore??"-"} / 100`,
+    `ましろと対面中の可能性: ${life.likelyWithMashiro?"高":"低"}`,
+    `生活モデル判定: ${life.canProactivelyMessage?"自発LINE可能":"今は送信しない"}`,
+    `生活状況: ${life.description||"不明"}`,
+    `直近の重複防止話題: ${recentTopics.length?recentTopics.slice(-3).map(x=>x.topicKey||x.text).join(" / "):"なし"}`,
+    `最後に重複で止めた話題: ${n.lastBlockedTopicKey||"なし"}`,
+    "",
     `ましろ最終発言: ${formatDiagnosticTime(n.latestUserAt)}`,
     `夏樹最終発言: ${formatDiagnosticTime(n.latestCharacterAt)}`,
     `ましろ発言クールダウン残り: ${formatDiagnosticDuration(n.recentUserRemainingMs)}`,
