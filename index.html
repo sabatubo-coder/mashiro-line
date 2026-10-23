@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.6.1</title>
+  <title>ましろLINE（仮） Phase 2.6.2</title>
   <style>
 :root {
   color-scheme: light;
@@ -1270,7 +1270,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.6.1-shiki-life-model-v1";
+const PUSH_VERSION = "phase2.6.2-ichi-life-model-v1";
 
 
 const SELF_PROFILE = {
@@ -2153,6 +2153,16 @@ function pushDiagnosticsText(data){
     );
   }
 
+  if(data.characterId==="ichi"){
+    lines.push(
+      "",
+      `イチの思いつき型LINE: 有効`,
+      `分割メッセージ: ${n.ichiSplitMessageEnabled?"有効":"無効"}`,
+      `自動分割の補助確率: ${Math.round(Number(n.ichiSplitMessageChance||0)*100)}%`,
+      `※AIが自然に2通へ分けた場合は確率に関係なく2吹き出しになります`
+    );
+  }
+
   lines.push(
     "",
     `ましろ最終発言: ${formatDiagnosticTime(n.latestUserAt)}`,
@@ -2249,7 +2259,8 @@ function buildPushDiagnosticsBlock(){
   selector.className="notification-diagnostic-select";
   [
     ["natsuki","夏樹"],
-    ["shiki","四季"]
+    ["shiki","四季"],
+    ["ichi","イチ"]
   ].forEach(([value,label])=>{
     const option=document.createElement("option");
     option.value=value;
