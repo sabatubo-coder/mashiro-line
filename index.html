@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.6.2</title>
+  <title>ましろLINE（仮） Phase 2.7</title>
   <style>
 :root {
   color-scheme: light;
@@ -1270,7 +1270,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.6.2-ichi-life-model-v1";
+const PUSH_VERSION = "phase2.7-proactive-quality-tuning-v1";
 
 
 const SELF_PROFILE = {
@@ -2095,7 +2095,8 @@ function pushDiagnosticsText(data){
     blocked_by_school:"学校時間のため見送り",
     blocked_by_soccer:"サッカー部活動中のため見送り",
     blocked_by_commute:"通学中のため見送り",
-    blocked_by_with_mashiro:"ましろと対面中の可能性が高いため見送り"
+    blocked_by_with_mashiro:"ましろと対面中の可能性が高いため見送り",
+    blocked_by_cross_character_similarity:"他キャラの直近LINEと似すぎているため見送り"
   }[decision]||decision||"なし");
   const activityLabel=(activity)=>({
     sleeping:"就寝中",
@@ -2139,7 +2140,12 @@ function pushDiagnosticsText(data){
     `生活モデル判定: ${life.canProactivelyMessage?"自発LINE可能":"今は送信しない"}`,
     `生活状況: ${life.description||"不明"}`,
     `直近の重複防止話題: ${recentTopics.length?recentTopics.slice(-3).map(x=>x.topicKey||x.text).join(" / "):"なし"}`,
-    `最後に重複で止めた話題: ${n.lastBlockedTopicKey||"なし"}`
+    `最後に重複で止めた話題: ${n.lastBlockedTopicKey||"なし"}`,
+    "",
+    `品質プロファイル: ${n.qualityProfile?.coreMotivation||"未設定"}`,
+    `品質の基本トーン: ${n.qualityProfile?.defaultTone||"未設定"}`,
+    `他キャラ直近自発LINE: ${Array.isArray(n.recentOtherCharacterProactive)&&n.recentOtherCharacterProactive.length?n.recentOtherCharacterProactive.slice(-3).map(x=>`${x.characterName}:${x.topicKey||x.text}`).join(" / "):"なし"}`,
+    `最後の他キャラ類似ブロック: ${n.lastQualityBlockCharacterId?`${n.lastQualityBlockCharacterId}（類似度${Math.round(Number(n.lastQualityBlockSimilarity||0)*100)}%）`:"なし"}`
   ];
 
   if(data.characterId==="shiki"){
