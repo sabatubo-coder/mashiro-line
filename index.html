@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.7</title>
+  <title>ましろLINE（仮） Phase 2.7.1</title>
   <style>
 :root {
   color-scheme: light;
@@ -1270,7 +1270,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.7-proactive-quality-tuning-v1";
+const PUSH_VERSION = "phase2.7.1-temporal-freshness-v1";
 
 
 const SELF_PROFILE = {
@@ -2096,7 +2096,8 @@ function pushDiagnosticsText(data){
     blocked_by_soccer:"サッカー部活動中のため見送り",
     blocked_by_commute:"通学中のため見送り",
     blocked_by_with_mashiro:"ましろと対面中の可能性が高いため見送り",
-    blocked_by_cross_character_similarity:"他キャラの直近LINEと似すぎているため見送り"
+    blocked_by_cross_character_similarity:"他キャラの直近LINEと似すぎているため見送り",
+    blocked_by_temporal_freshness:"時間整合性・話題鮮度のため見送り"
   }[decision]||decision||"なし");
   const activityLabel=(activity)=>({
     sleeping:"就寝中",
@@ -2145,7 +2146,13 @@ function pushDiagnosticsText(data){
     `品質プロファイル: ${n.qualityProfile?.coreMotivation||"未設定"}`,
     `品質の基本トーン: ${n.qualityProfile?.defaultTone||"未設定"}`,
     `他キャラ直近自発LINE: ${Array.isArray(n.recentOtherCharacterProactive)&&n.recentOtherCharacterProactive.length?n.recentOtherCharacterProactive.slice(-3).map(x=>`${x.characterName}:${x.topicKey||x.text}`).join(" / "):"なし"}`,
-    `最後の他キャラ類似ブロック: ${n.lastQualityBlockCharacterId?`${n.lastQualityBlockCharacterId}（類似度${Math.round(Number(n.lastQualityBlockSimilarity||0)*100)}%）`:"なし"}`
+    `最後の他キャラ類似ブロック: ${n.lastQualityBlockCharacterId?`${n.lastQualityBlockCharacterId}（類似度${Math.round(Number(n.lastQualityBlockSimilarity||0)*100)}%）`:"なし"}`,
+    "",
+    `時間整合性・話題鮮度補正: ${n.temporalFreshnessEnabled?"有効":"無効"}`,
+    `「さっき」の鮮度上限: ${n.temporalRules?.justNowHours??3}時間`,
+    `一時的話題の継続目安: ${n.temporalRules?.transientTopicHours??6}時間`,
+    `最後の時間・鮮度ブロック: ${n.lastTemporalBlockReason||"なし"}`,
+    `最後の時間・鮮度ブロック時刻: ${formatDiagnosticTime(n.lastTemporalBlockAtIso)}`
   ];
 
   if(data.characterId==="shiki"){
