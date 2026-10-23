@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.5</title>
+  <title>ましろLINE（仮） Phase 2.6</title>
   <style>
 :root {
   color-scheme: light;
@@ -1257,7 +1257,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.5-natsuki-life-topic-dedup-v1";
+const PUSH_VERSION = "phase2.6-common-life-model-base-v1";
 
 
 const SELF_PROFILE = {
@@ -2104,6 +2104,7 @@ function pushDiagnosticsText(data){
     `最後の判定内容: ${decisionLabel(n.lastAttemptDecision)}`,
     `今日の送信数: ${n.dailyCount} / ${n.dailyMax}`,
     "",
+    `生活モデル基盤: ${n.lifeModelEngine==="common-v1"?"共通エンジン Ver.1":"旧方式"}`,
     `夏樹の現在状態: ${activityLabel(life.activity)}`,
     `今日のタイプ: ${dayTypeLabel(life.dayType)}`,
     `LINEしやすさ: ${life.availabilityScore??"-"} / 100`,
