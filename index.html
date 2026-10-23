@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.7.1</title>
+  <title>ましろLINE（仮） Phase 2.7.2</title>
   <style>
 :root {
   color-scheme: light;
@@ -1270,7 +1270,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.7.1-temporal-freshness-v1";
+const PUSH_VERSION = "phase2.7.2-reliability-long-dedup-rollover-v1";
 
 
 const SELF_PROFILE = {
@@ -2097,7 +2097,10 @@ function pushDiagnosticsText(data){
     blocked_by_commute:"通学中のため見送り",
     blocked_by_with_mashiro:"ましろと対面中の可能性が高いため見送り",
     blocked_by_cross_character_similarity:"他キャラの直近LINEと似すぎているため見送り",
-    blocked_by_temporal_freshness:"時間整合性・話題鮮度のため見送り"
+    blocked_by_temporal_freshness:"時間整合性・話題鮮度のため見送り",
+    blocked_by_long_term_duplicate:"過去数日の発言と似すぎているため見送り",
+    deferred_by_quiet_hours:"通知しない時間帯のため次回予定へ繰越",
+    push_delivery_pending:"Push通知の再送待ち"
   }[decision]||decision||"なし");
   const activityLabel=(activity)=>({
     sleeping:"就寝中",
@@ -2152,7 +2155,12 @@ function pushDiagnosticsText(data){
     `「さっき」の鮮度上限: ${n.temporalRules?.justNowHours??3}時間`,
     `一時的話題の継続目安: ${n.temporalRules?.transientTopicHours??6}時間`,
     `最後の時間・鮮度ブロック: ${n.lastTemporalBlockReason||"なし"}`,
-    `最後の時間・鮮度ブロック時刻: ${formatDiagnosticTime(n.lastTemporalBlockAtIso)}`
+    `最後の時間・鮮度ブロック時刻: ${formatDiagnosticTime(n.lastTemporalBlockAtIso)}`,
+    "",
+    `長期文章重複防止: ${n.longTextDuplicateWindowDays??7}日`,
+    `Push送達状態: ${n.lastPushDeliveryStatus||"記録なし"}`,
+    `最後のPush送達: ${formatDiagnosticTime(n.lastPushDeliveryAtIso)}`,
+    `Push再送待ち: ${n.pendingPushRetryCount??0}件`
   ];
 
   if(data.characterId==="shiki"){
