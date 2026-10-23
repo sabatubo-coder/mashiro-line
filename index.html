@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.6</title>
+  <title>ましろLINE（仮） Phase 2.6.1</title>
   <style>
 :root {
   color-scheme: light;
@@ -968,6 +968,19 @@ button { -webkit-tap-highlight-color: transparent; }
   background: #fcfcfd;
 }
 
+.notification-diagnostic-select {
+  width: 100%;
+  min-height: 42px;
+  margin-bottom: 8px;
+  padding: 0 12px;
+  border: 1px solid #d7dbdf;
+  border-radius: 11px;
+  background: #fff;
+  color: #33363b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .notification-diagnostics-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1257,7 +1270,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.6-common-life-model-base-v1";
+const PUSH_VERSION = "phase2.6.1-shiki-life-model-v1";
 
 
 const SELF_PROFILE = {
@@ -1322,7 +1335,8 @@ const appState = {
   pushBridgeTimer: null,
   pushBridgeBusy: false,
   pushDiagnosticsData: null,
-  pushDiagnosticsBusy: false
+  pushDiagnosticsBusy: false,
+  pushDiagnosticsCharacterId: "natsuki"
 };
 
 const listScreen = document.getElementById("listScreen");
@@ -2054,12 +2068,13 @@ function pushDiagnosticsText(data){
   if(data?.error)return `診断エラー: ${data.error}`;
   if(data.registered===false)return "このiPhoneのPush登録がBackendに見つかりません。";
 
-  const n=data.natsuki;
+  const n=data.character;
+  const name=data.characterDisplayName||"キャラクター";
   const scheduler=data.scheduler||{};
-  if(!data.snapshotHasNatsuki||!n){
+  if(!data.snapshotHasCharacter||!n){
     return [
       "Push登録: あり",
-      "夏樹の通知スナップショット: なし",
+      `${name}の通知スナップショット: なし`,
       "PWAから一度通知同期を行ってください。"
     ].join("\n");
   }
@@ -2068,6 +2083,7 @@ function pushDiagnosticsText(data){
     blocked_by_sleep:"就寝中",
     blocked_by_school:"学校・授業時間",
     blocked_by_soccer:"サッカー部活動中",
+    blocked_by_commute:"通学中",
     blocked_by_with_mashiro:"ましろと対面中の可能性が高い",
     blocked_by_life_model:"生活モデル上、今は送信しない"
   }[reason]||reason);
@@ -2078,23 +2094,34 @@ function pushDiagnosticsText(data){
     blocked_by_sleep:"就寝中のため見送り",
     blocked_by_school:"学校時間のため見送り",
     blocked_by_soccer:"サッカー部活動中のため見送り",
+    blocked_by_commute:"通学中のため見送り",
     blocked_by_with_mashiro:"ましろと対面中の可能性が高いため見送り"
   }[decision]||decision||"なし");
   const activityLabel=(activity)=>({
-    sleeping:"就寝中", morning_home:"朝・自宅", with_mashiro_commute:"ましろと登校中",
-    school:"学校・授業時間", soccer_club:"サッカー部活動中",
+    sleeping:"就寝中",
+    morning_home:"朝・自宅",
+    commuting:"通学中",
+    with_mashiro_commute:"ましろと登校中",
+    school:"学校・授業時間",
+    soccer_club:"サッカー部活動中",
     after_school_with_mashiro:"ましろと下校中の可能性が高い",
-    bath_or_dinner:"帰宅・入浴・夕食", free_evening:"夜の自由時間",
-    before_sleep:"就寝前", holiday_morning:"休日の朝", holiday_free:"休日・自由時間"
+    bath_or_dinner:"帰宅・入浴・夕食",
+    free_evening:"夜の自由時間",
+    before_sleep:"就寝前",
+    holiday_morning:"休日の朝",
+    holiday_free:"休日・自由時間"
   }[activity]||activity||"不明");
   const dayTypeLabel=(dayType)=>({
-    school_club_day:"学校＋サッカー部", school_free_day:"学校・部活なし", holiday_free:"休日・予定情報なし"
+    school_club_day:"学校＋サッカー部",
+    school_free_day:"学校・部活なし",
+    holiday_free:"休日・予定情報なし"
   }[dayType]||dayType||"不明");
 
   const reasons=Array.isArray(n.reasons)&&n.reasons.length?n.reasons.map(reasonLabel).join(" / "):"なし";
   const life=n.life||{};
   const recentTopics=Array.isArray(n.recentProactiveHistory)?n.recentProactiveHistory:[];
   const lines=[
+    `診断対象: ${name}`,
     `現在の判定: ${n.eligible?"送信対象（eligible）":"まだ送信しない"}`,
     `理由: ${reasons}`,
     `次回予定: ${formatDiagnosticTime(n.nextDueAtIso)}`,
@@ -2105,19 +2132,33 @@ function pushDiagnosticsText(data){
     `今日の送信数: ${n.dailyCount} / ${n.dailyMax}`,
     "",
     `生活モデル基盤: ${n.lifeModelEngine==="common-v1"?"共通エンジン Ver.1":"旧方式"}`,
-    `夏樹の現在状態: ${activityLabel(life.activity)}`,
+    `${name}の現在状態: ${activityLabel(life.activity)}`,
     `今日のタイプ: ${dayTypeLabel(life.dayType)}`,
     `LINEしやすさ: ${life.availabilityScore??"-"} / 100`,
     `ましろと対面中の可能性: ${life.likelyWithMashiro?"高":"低"}`,
     `生活モデル判定: ${life.canProactivelyMessage?"自発LINE可能":"今は送信しない"}`,
     `生活状況: ${life.description||"不明"}`,
     `直近の重複防止話題: ${recentTopics.length?recentTopics.slice(-3).map(x=>x.topicKey||x.text).join(" / "):"なし"}`,
-    `最後に重複で止めた話題: ${n.lastBlockedTopicKey||"なし"}`,
+    `最後に重複で止めた話題: ${n.lastBlockedTopicKey||"なし"}`
+  ];
+
+  if(data.characterId==="shiki"){
+    const o=n.observation;
+    lines.push(
+      "",
+      `四季の観察フラグ: ${o?.active?"あり":"なし"}`,
+      `観察の強さ: ${o?.strength||"なし"}`,
+      `観察理由: ${o?.reason||"なし"}`,
+      `今触れるのが自然か: ${o?.appropriateToMentionNow?"はい":"いいえ"}`
+    );
+  }
+
+  lines.push(
     "",
     `ましろ最終発言: ${formatDiagnosticTime(n.latestUserAt)}`,
-    `夏樹最終発言: ${formatDiagnosticTime(n.latestCharacterAt)}`,
+    `${name}最終発言: ${formatDiagnosticTime(n.latestCharacterAt)}`,
     `ましろ発言クールダウン残り: ${formatDiagnosticDuration(n.recentUserRemainingMs)}`,
-    `夏樹連投防止残り: ${formatDiagnosticDuration(n.recentCharacterRemainingMs)}`,
+    `${name}連投防止残り: ${formatDiagnosticDuration(n.recentCharacterRemainingMs)}`,
     `通知しない時間帯: ${n.quietNow?"はい":"いいえ"}`,
     "",
     `Backend定期判定回数: ${scheduler.runCount??0}`,
@@ -2128,7 +2169,8 @@ function pushDiagnosticsText(data){
     `最後のエラー: ${scheduler.lastError||"なし"}`,
     `端末スナップショット更新: ${formatDiagnosticTime(data.deviceUpdatedAt)}`,
     `未取得Pushイベント: ${data.pendingEventCount??0}`
-  ];
+  );
+
   return lines.join("\n");
 }
 
@@ -2146,7 +2188,7 @@ async function fetchPushDiagnostics({render=true}={}){
   if(render)renderSettingsScreen();
 
   try{
-    const url=`${endpointFor(apiEndpoint,"pushDiagnostics")}?deviceId=${encodeURIComponent(getPushDeviceId())}`;
+    const url=`${endpointFor(apiEndpoint,"pushDiagnostics")}?deviceId=${encodeURIComponent(getPushDeviceId())}&characterId=${encodeURIComponent(appState.pushDiagnosticsCharacterId||"natsuki")}`;
     const data=await fetchJsonWithRetry(url,{
       method:"GET",
       headers:{"X-App-Code":accessCode}
@@ -2203,6 +2245,26 @@ function buildPushDiagnosticsBlock(){
   const wrap=document.createElement("div");
   wrap.className="notification-diagnostics-wrap";
 
+  const selector=document.createElement("select");
+  selector.className="notification-diagnostic-select";
+  [
+    ["natsuki","夏樹"],
+    ["shiki","四季"]
+  ].forEach(([value,label])=>{
+    const option=document.createElement("option");
+    option.value=value;
+    option.textContent=`診断対象：${label}`;
+    option.selected=(appState.pushDiagnosticsCharacterId===value);
+    selector.appendChild(option);
+  });
+  selector.disabled=!pushNotificationsEnabled()||appState.pushDiagnosticsBusy;
+  selector.addEventListener("change",()=>{
+    appState.pushDiagnosticsCharacterId=selector.value;
+    appState.pushDiagnosticsData=null;
+    renderSettingsScreen();
+  });
+  wrap.appendChild(selector);
+
   const actions=document.createElement("div");
   actions.className="notification-diagnostics-actions";
 
@@ -2224,7 +2286,7 @@ function buildPushDiagnosticsBlock(){
 
   const panel=document.createElement("div");
   const data=appState.pushDiagnosticsData;
-  const eligible=Boolean(data?.natsuki?.eligible);
+  const eligible=Boolean(data?.character?.eligible);
   const hasError=Boolean(data?.error||data?.registered===false);
   panel.className=`notification-diagnostics-panel${hasError?" error":eligible?" good":data?" warn":""}`;
   panel.textContent=pushDiagnosticsText(data);
