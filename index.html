@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 3.0.3</title>
+  <title>ましろLINE（仮） Phase 3.0.4</title>
   <style>
 :root {
   color-scheme: light;
@@ -1271,7 +1271,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
-const PUSH_VERSION = "phase3.0.3-formal-bunji-sosuke-life-models-v1";
+const PUSH_VERSION = "phase3.0.4-diagnostic-timestamp-race-fix-v1";
 
 
 const SELF_PROFILE = {
@@ -2764,9 +2764,28 @@ function pushDiagnosticsText(data){
     "",
     `Backend定期判定回数: ${scheduler.runCount??0}`,
     `最後の判定元: ${scheduler.lastSource||"なし"}`,
+    `最後の判定状態: ${
+      scheduler.lastRunStatus==="running"
+        ?"実行中"
+        :scheduler.lastRunStatus==="completed"
+          ?"完了"
+          :scheduler.lastRunStatus==="error"
+            ?"エラー"
+            :"待機"
+    }`,
     `最後の判定開始: ${formatDiagnosticTime(scheduler.lastRunStartedAt)}`,
-    `最後の判定終了: ${formatDiagnosticTime(scheduler.lastRunFinishedAt)}`,
-    `最後の判定結果: ${scheduler.lastResult?JSON.stringify(scheduler.lastResult):"なし"}`,
+    `最後の判定終了: ${
+      scheduler.lastRunStatus==="running"
+        ?"実行中"
+        :formatDiagnosticTime(scheduler.lastRunFinishedAt)
+    }`,
+    `最後の判定結果: ${
+      scheduler.lastRunStatus==="running"
+        ?"実行中"
+        :scheduler.lastResult
+          ?JSON.stringify(scheduler.lastResult)
+          :"なし"
+    }`,
     `最後のエラー: ${scheduler.lastError||"なし"}`,
     `端末スナップショット更新: ${formatDiagnosticTime(data.deviceUpdatedAt)}`,
     `未取得Pushイベント: ${data.pendingEventCount??0}`
