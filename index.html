@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.8.1</title>
+  <title>ましろLINE（仮） Phase 2.9</title>
   <style>
 :root {
   color-scheme: light;
@@ -1271,7 +1271,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
-const PUSH_VERSION = "phase2.8.1-background-read-badge-fix-v1";
+const PUSH_VERSION = "phase2.9-online-presence-life-model-v1";
 
 
 const SELF_PROFILE = {
@@ -1338,7 +1338,10 @@ const appState = {
   pushDiagnosticsData: null,
   pushDiagnosticsBusy: false,
   pushDiagnosticsCharacterId: "natsuki",
-  delayedDmTimer: null
+  delayedDmTimer: null,
+  presenceTimer: null,
+  presenceBusy: false,
+  presenceRequestSeq: 0
 };
 
 const listScreen = document.getElementById("listScreen");
@@ -1650,17 +1653,151 @@ function markIncomingSeen(conversationId,{force=false}={}){
   return changed;
 }
 
+
+const PRESENCE_SUPPORTED_CHARACTERS = new Set(["natsuki","shiki","ichi"]);
+
+function presenceSupportedConversation(conversation){
+  return Boolean(
+    conversation &&
+    conversation.type==="dm" &&
+    PRESENCE_SUPPORTED_CHARACTERS.has(conversation.characterId)
+  );
+}
+
+function latestDmCharacterActivityAt(conversationId,characterId){
+  const messages=loadConversationMessages(conversationId);
+  let latestMs=0;
+
+  for(const message of messages){
+    let candidate="";
+
+    if(message.senderId===characterId){
+      candidate=message.createdAt||"";
+    }else if(
+      message.senderId==="mashiro" &&
+      message.readByCharacter &&
+      message.readAt
+    ){
+      candidate=message.readAt;
+    }
+
+    const ms=Date.parse(candidate||"");
+    if(Number.isFinite(ms)&&ms>latestMs)latestMs=ms;
+  }
+
+  return latestMs?new Date(latestMs).toISOString():"";
+}
+
+function setPresenceStatusText(value){
+  statusText.textContent=value||"\u00A0";
+}
+
+async function refreshPresenceStatus({force=false}={}){
+  const conversation=activeConversation();
+
+  if(
+    !conversation ||
+    conversation.type!=="dm" ||
+    chatScreen.hidden ||
+    document.visibilityState!=="visible"
+  ){
+    return;
+  }
+
+  if(typingRow.classList.contains("visible"))return;
+
+  if(!presenceSupportedConversation(conversation)){
+    setPresenceStatusText("オンライン");
+    return;
+  }
+
+  if(appState.presenceBusy&&!force)return;
+
+  const apiEndpoint=getApiEndpoint();
+  const accessCode=getAccessCode();
+  if(!apiEndpoint||!accessCode){
+    setPresenceStatusText("");
+    return;
+  }
+
+  const requestSeq=++appState.presenceRequestSeq;
+  appState.presenceBusy=true;
+
+  try{
+    const data=await fetchJsonWithRetry(
+      endpointFor(apiEndpoint,"presenceStatus"),
+      {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "X-App-Code":accessCode
+        },
+        body:JSON.stringify({
+          characterId:conversation.characterId,
+          timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+          latestActivityAt:latestDmCharacterActivityAt(
+            conversation.id,
+            conversation.characterId
+          )
+        })
+      },
+      0
+    );
+
+    if(requestSeq!==appState.presenceRequestSeq)return;
+
+    const current=activeConversation();
+    if(
+      !current ||
+      current.id!==conversation.id ||
+      chatScreen.hidden ||
+      document.visibilityState!=="visible" ||
+      typingRow.classList.contains("visible")
+    ){
+      return;
+    }
+
+    setPresenceStatusText(data?.supported&&data?.online?"オンライン":"");
+  }catch{
+    if(requestSeq===appState.presenceRequestSeq)setPresenceStatusText("");
+  }finally{
+    if(requestSeq===appState.presenceRequestSeq)appState.presenceBusy=false;
+  }
+}
+
+function schedulePresenceRefresh(delay=100){
+  setTimeout(()=>refreshPresenceStatus({force:true}),delay);
+}
+
+function startPresenceScheduler(){
+  clearInterval(appState.presenceTimer);
+  appState.presenceTimer=setInterval(()=>{
+    if(document.visibilityState==="visible"&&!chatScreen.hidden){
+      refreshPresenceStatus();
+    }
+  },30*1000);
+
+  document.addEventListener("visibilitychange",()=>{
+    if(document.visibilityState==="visible"){
+      schedulePresenceRefresh(300);
+    }
+  });
+
+  window.addEventListener("focus",()=>schedulePresenceRefresh(300));
+}
+
 function openConversation(conversationId,pushHistory=true){
   const conversation=conversationById(conversationId);if(!conversation)return;
   appState.activeConversationId=conversationId;
   if(conversation.type==="dm"){
-    const c=characterById(conversation.characterId);chatTitle.textContent=getCharacterDisplayName(c.id);statusText.textContent="オンライン";typingLabel.textContent=`${getCharacterDisplayName(c.id)}が入力中…`;applyCharacterAvatar(headerAvatar,c.id);applyCharacterAvatar(typingAvatar,c.id);
+    const c=characterById(conversation.characterId);chatTitle.textContent=getCharacterDisplayName(c.id);setPresenceStatusText(presenceSupportedConversation(conversation)?"":"オンライン");typingLabel.textContent=`${getCharacterDisplayName(c.id)}が入力中…`;applyCharacterAvatar(headerAvatar,c.id);applyCharacterAvatar(typingAvatar,c.id);
   }else{
     const g=groupById(conversation.groupId);chatTitle.textContent=getGroupName(g.id);statusText.textContent="6人";typingLabel.textContent="誰かが入力中…";applyGroupAvatar(headerAvatar,g.id);applyGroupAvatar(typingAvatar,g.id);
   }
   listScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;chatScreen.hidden=false;
   markIncomingSeen(conversationId);
   renderMessages();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);
+  if(presenceSupportedConversation(conversation))schedulePresenceRefresh(80);
   if(pushHistory)history.pushState({conversationId},"",`#chat=${conversationId}`);
 }
 function showTalkList(pushHistory=true){appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
@@ -1814,7 +1951,17 @@ function setTyping(visible,speakerId=null){
     else{applyGroupAvatar(typingAvatar,conversation.groupId);typingLabel.textContent="誰かが入力中…";}
   }
   typingRow.classList.toggle("visible",visible);typingRow.setAttribute("aria-hidden",visible?"false":"true");
-  statusText.textContent=visible?"入力中…":conversation.type==="dm"?"オンライン":"6人";if(visible)scrollToBottom();
+  if(visible){
+    statusText.textContent="入力中…";
+    scrollToBottom();
+  }else if(conversation.type==="group"){
+    statusText.textContent="6人";
+  }else if(presenceSupportedConversation(conversation)){
+    setPresenceStatusText("");
+    schedulePresenceRefresh(80);
+  }else{
+    statusText.textContent="オンライン";
+  }
 }
 function autosizeInput(){messageInput.style.height="auto";messageInput.style.height=`${Math.min(messageInput.scrollHeight,120)}px`;sendButton.disabled=!messageInput.value.trim()||appState.isReplying||!appState.activeConversationId;}
 
@@ -1843,20 +1990,25 @@ function addMessage(conversationId,senderId,text,options={}){
   }
 
   renderTalkList();
+
+  if(
+    conversation.type==="dm" &&
+    senderId===conversation.characterId &&
+    presenceSupportedConversation(conversation)
+  ){
+    schedulePresenceRefresh(50);
+  }
+
   return message;
 }
-function markOutgoingRead(conversationId){const messages=loadConversationMessages(conversationId);let changed=false;for(const m of messages){if(m.senderId==="mashiro"&&!m.readByCharacter){m.readByCharacter=true;changed=true;}}if(changed){saveConversationMessages(conversationId,messages);if(appState.activeConversationId===conversationId)renderMessages();renderTalkList();}}
-
-
-function markOutgoingReadThrough(conversationId,throughCreatedAt){
-  const throughMs=Date.parse(throughCreatedAt||"");
+function markOutgoingRead(conversationId){
   const messages=loadConversationMessages(conversationId);
   let changed=false;
-  for(const message of messages){
-    if(message.senderId!=="mashiro"||message.readByCharacter)continue;
-    const createdMs=Date.parse(message.createdAt||"");
-    if(!Number.isFinite(throughMs)||!Number.isFinite(createdMs)||createdMs<=throughMs){
-      message.readByCharacter=true;
+  const readAt=new Date().toISOString();
+  for(const m of messages){
+    if(m.senderId==="mashiro"&&!m.readByCharacter){
+      m.readByCharacter=true;
+      m.readAt=m.readAt||readAt;
       changed=true;
     }
   }
@@ -1864,6 +2016,35 @@ function markOutgoingReadThrough(conversationId,throughCreatedAt){
     saveConversationMessages(conversationId,messages);
     if(appState.activeConversationId===conversationId)renderMessages();
     renderTalkList();
+    schedulePresenceRefresh(50);
+  }
+}
+
+
+function markOutgoingReadThrough(conversationId,throughCreatedAt,readAtOverride=""){
+  const throughMs=Date.parse(throughCreatedAt||"");
+  const messages=loadConversationMessages(conversationId);
+  let changed=false;
+  const readAt=
+    Number.isFinite(Date.parse(readAtOverride||""))
+      ?new Date(Date.parse(readAtOverride)).toISOString()
+      :new Date().toISOString();
+
+  for(const message of messages){
+    if(message.senderId!=="mashiro"||message.readByCharacter)continue;
+    const createdMs=Date.parse(message.createdAt||"");
+    if(!Number.isFinite(throughMs)||!Number.isFinite(createdMs)||createdMs<=throughMs){
+      message.readByCharacter=true;
+      message.readAt=message.readAt||readAt;
+      changed=true;
+    }
+  }
+
+  if(changed){
+    saveConversationMessages(conversationId,messages);
+    if(appState.activeConversationId===conversationId)renderMessages();
+    renderTalkList();
+    schedulePresenceRefresh(50);
   }
 }
 
@@ -1934,7 +2115,11 @@ async function processDelayedDmState(){
   for(const item of state.reads){
     const due=Date.parse(item?.readAt||"");
     if(Number.isFinite(due)&&due<=now){
-      markOutgoingReadThrough(item.conversationId,item.throughCreatedAt);
+      markOutgoingReadThrough(
+        item.conversationId,
+        item.throughCreatedAt,
+        item.readAt
+      );
       changed=true;
     }else remainingReads.push(item);
   }
@@ -2073,6 +2258,7 @@ function endpointFor(apiEndpoint,kind){
   if(kind==="pushNatsukiProactiveTest")return `${base}/api/push/test-proactive-natsuki`;
   if(kind==="pushDiagnostics")return `${base}/api/push/diagnostics`;
   if(kind==="pushRunDue")return `${base}/api/push/run-due`;
+  if(kind==="presenceStatus")return `${base}/api/presence/status`;
   return apiEndpoint;
 }
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
@@ -2535,6 +2721,17 @@ function pushDiagnosticsText(data){
     );
   }
 
+  if(n.presenceProfile?.enabled){
+    lines.push(
+      "",
+      "オンライン状態・生活モデル連動: 有効",
+      `オンライン維持の基本目安: ${n.presenceProfile.baseWindowMinutes}分`,
+      `現在状態での維持目安: ${n.presenceProfile.currentWindowMinutes}分`,
+      `現在の生活状態: ${n.presenceProfile.currentLifeActivity||"不明"}`,
+      "受動オンライン: なし（実際のLINE活動がある時だけ表示）"
+    );
+  }
+
   if(data.characterId==="shiki"){
     const o=n.observation;
     lines.push(
@@ -2988,7 +3185,7 @@ migrateLegacyNatsukiData();
 const initialChatMatch=location.hash.match(/^#chat=([^&]+)$/);
 const initialConversationId=initialChatMatch?decodeURIComponent(initialChatMatch[1]):"";
 history.replaceState({list:true},"",location.pathname+location.search);
-renderTalkList();showTalkList(false);autosizeInput();registerServiceWorker();startDelayedDmScheduler();startProactiveScheduler();startPushBridge();
+renderTalkList();showTalkList(false);autosizeInput();registerServiceWorker();startDelayedDmScheduler();startPresenceScheduler();startProactiveScheduler();startPushBridge();
 if(initialConversationId&&conversationById(initialConversationId)){
   setTimeout(()=>{openConversation(initialConversationId,false);history.replaceState({conversationId:initialConversationId},"",`#chat=${encodeURIComponent(initialConversationId)}`);},250);
 }

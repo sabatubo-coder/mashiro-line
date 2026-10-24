@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase2-8-1-background-read-badge-fix-v1";
+const CACHE_NAME = "mashiro-line-phase2-9-online-presence-v1";
 const ASSETS = [
   "./",
   "./index.html",
