@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.9</title>
+  <title>ましろLINE（仮） Phase 3.0</title>
   <style>
 :root {
   color-scheme: light;
@@ -1271,7 +1271,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
-const PUSH_VERSION = "phase2.9-online-presence-life-model-v1";
+const PUSH_VERSION = "phase3.0-bunji-sosuke-life-models-v1";
 
 
 const SELF_PROFILE = {
@@ -1654,7 +1654,7 @@ function markIncomingSeen(conversationId,{force=false}={}){
 }
 
 
-const PRESENCE_SUPPORTED_CHARACTERS = new Set(["natsuki","shiki","ichi"]);
+const PRESENCE_SUPPORTED_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
 
 function presenceSupportedConversation(conversation){
   return Boolean(

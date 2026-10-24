@@ -1,2 +1,2 @@
-// ましろLINE Phase 2.9 オンライン状態・生活モデル連動
+// ましろLINE Phase 3.0 ブンジ・ソウスケ生活モデル実装
 window.MASHIROLINE_API_ENDPOINT = "https://mashiro-line-backend-importzip--misomimizu.replit.app/api/chat";
