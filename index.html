@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 3.0.1</title>
+  <title>ましろLINE（仮） Phase 3.0.3</title>
   <style>
 :root {
   color-scheme: light;
@@ -1271,7 +1271,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
-const PUSH_VERSION = "phase3.0.1-diagnostics-target-fix-v1";
+const PUSH_VERSION = "phase3.0.3-formal-bunji-sosuke-life-models-v1";
 
 
 const SELF_PROFILE = {
@@ -2685,6 +2685,7 @@ function pushDiagnosticsText(data){
     `今日の送信数: ${n.dailyCount} / ${n.dailyMax}`,
     "",
     `生活モデル基盤: ${n.lifeModelEngine==="common-v1"?"共通エンジン Ver.1":"旧方式"}`,
+    `生活モデル状態: ${n.lifeModelStatus==="formal-v1"?"正式 Ver.1":n.lifeModelStatus==="existing-v1"?"既存 Ver.1":"未設定"}`,
     `${name}の現在状態: ${activityLabel(life.activity)}`,
     `今日のタイプ: ${dayTypeLabel(life.dayType)}`,
     `LINEしやすさ: ${life.availabilityScore??"-"} / 100`,
