@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 3.0.4</title>
+  <title>ましろLINE（仮） Phase 3.1</title>
   <style>
 :root {
   color-scheme: light;
@@ -1271,7 +1271,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
-const PUSH_VERSION = "phase3.0.4-diagnostic-timestamp-race-fix-v1";
+const PUSH_VERSION = "phase3.1-group-autonomous-conversation-v1";
 
 
 const SELF_PROFILE = {
@@ -1341,7 +1341,8 @@ const appState = {
   delayedDmTimer: null,
   presenceTimer: null,
   presenceBusy: false,
-  presenceRequestSeq: 0
+  presenceRequestSeq: 0,
+  groupAutonomousTestBusy: false
 };
 
 const listScreen = document.getElementById("listScreen");
@@ -2248,6 +2249,7 @@ function endpointFor(apiEndpoint,kind){
   if(kind==="proactive")return `${base}/api/proactive`;
   if(kind==="groupChat")return `${base}/api/group/chat`;
   if(kind==="groupProactive")return `${base}/api/group/proactive`;
+  if(kind==="groupAutonomousCancel")return `${base}/api/group/autonomous/cancel`;
   if(kind==="pushPublicKey")return `${base}/api/push/public-key`;
   if(kind==="pushRegister")return `${base}/api/push/register`;
   if(kind==="pushSync")return `${base}/api/push/sync`;
@@ -2312,6 +2314,10 @@ async function sendUserMessage(){
         scheduleDmProactive(conversation.characterId,"normal");
       }
     }else{
+      // ましろが途中参加したら、Backendに残っている
+      // 自律会話の続きはキャンセルし、今回の発言への返信を優先する。
+      await cancelPendingGroupAutonomous(conversation.groupId);
+
       await sleep(350);
       markOutgoingRead(conversation.id);
       setTyping(true);
@@ -2588,6 +2594,73 @@ async function sendForcedNatsukiProactiveTest(){
   }catch(error){
     console.error(error);
     showToast("夏樹の自発通知テストに失敗しました",5000);
+  }
+}
+
+
+async function sendForcedGroupAutonomousTest(){
+  if(appState.groupAutonomousTestBusy)return;
+
+  const apiEndpoint=getApiEndpoint();
+  let accessCode=getAccessCode();
+
+  if(!apiEndpoint){
+    showToast("AIバックエンドURLが設定されていません",4500);
+    return;
+  }
+
+  if(!accessCode)accessCode=await askForAccessCode();
+  if(!accessCode)return;
+
+  const group=groupById("classmates");
+  if(!group)return;
+
+  appState.groupAutonomousTestBusy=true;
+
+  try{
+    showToast("グループ自律会話を生成しています…",3500);
+    await warmBackend(apiEndpoint);
+
+    const result=await callGroupProactive(
+      group.id,
+      accessCode,
+      apiEndpoint,
+      {
+        force:true,
+        manualTest:true
+      }
+    );
+
+    const replies=Array.isArray(result?.replies)?result.replies.slice(0,5):[];
+    if(replies.length<2){
+      showToast("今回は会話セッションを生成できませんでした",4500);
+      return;
+    }
+
+    for(let index=0;index<replies.length;index+=1){
+      const reply=replies[index];
+      if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
+
+      if(index>0)await sleep(800);
+
+      addMessage(
+        group.conversationId,
+        reply.speakerId,
+        String(reply.message).trim(),
+        {
+          source:"group-autonomous-test",
+          seenByUser:false
+        }
+      );
+    }
+
+    updateAppBadgeFromLocal();
+    showToast(`グループに自律会話を${replies.length}通追加しました`,4500);
+  }catch(error){
+    console.error(error);
+    showToast("グループ自律会話テストに失敗しました",5000);
+  }finally{
+    appState.groupAutonomousTestBusy=false;
   }
 }
 
@@ -3099,6 +3172,13 @@ function buildNotificationSettingsSection(){
   const forcedNote=document.createElement("div");forcedNote.className="notification-forced-test-note";forcedNote.textContent="自然な待ち時間を無視し、このテスト時だけ夏樹から実際の自発メッセージを1通生成します。通常の送信回数・次回予定には影響しません。";
   forcedWrap.append(forcedButton,forcedNote);
   card.appendChild(forcedWrap);
+
+  const groupForcedWrap=document.createElement("div");groupForcedWrap.className="notification-forced-test-wrap";
+  const groupForcedButton=document.createElement("button");groupForcedButton.type="button";groupForcedButton.className="notification-forced-test";groupForcedButton.textContent=appState.groupAutonomousTestBusy?"グループ自律会話を生成中…":"グループ自律会話を今すぐテスト";groupForcedButton.disabled=appState.groupAutonomousTestBusy;groupForcedButton.addEventListener("click",sendForcedGroupAutonomousTest);
+  const groupForcedNote=document.createElement("div");groupForcedNote.className="notification-forced-test-note";groupForcedNote.textContent="通常の待ち時間と生活時間帯制限をテスト時だけ無視し、クラスメイト6人のグループにキャラクター同士の短い会話を2〜5通生成します。通常の送信回数・次回予定には影響しません。";
+  groupForcedWrap.append(groupForcedButton,groupForcedNote);
+  card.appendChild(groupForcedWrap);
+
   card.appendChild(buildPushDiagnosticsBlock());
 
   const enabled=pushNotificationsEnabled();
@@ -3157,12 +3237,162 @@ async function maybeSendDmProactive(characterId){
 function loadGroupProactiveState(groupId){const g=groupById(groupId),now=Date.now();try{const raw=localStorage.getItem(groupProactiveKey(groupId));if(raw){const p=JSON.parse(raw);if(p.dailyDate!==dateKey()){p.dailyDate=dateKey();p.dailyCount=0;}if(!Number.isFinite(Number(p.nextDueAt)))p.nextDueAt=now+randomBetween(g.proactive.normalMinMs,g.proactive.normalMaxMs);return{nextDueAt:Number(p.nextDueAt),lastSentAt:Number(p.lastSentAt||0),dailyDate:p.dailyDate||dateKey(),dailyCount:Number(p.dailyCount||0)};}}catch{}return{nextDueAt:now+randomBetween(g.proactive.normalMinMs,g.proactive.normalMaxMs),lastSentAt:0,dailyDate:dateKey(),dailyCount:0};}
 function saveGroupProactiveState(id,state){localStorage.setItem(groupProactiveKey(id),JSON.stringify(state));schedulePushSync();}
 function scheduleGroupProactive(id,mode="normal"){const g=groupById(id),s=loadGroupProactiveState(id),now=Date.now();if(isQuietTime())s.nextDueAt=nextMorningTimestamp();else if(mode==="retry")s.nextDueAt=now+randomBetween(20*60*1000,40*60*1000);else s.nextDueAt=now+randomBetween(g.proactive.normalMinMs,g.proactive.normalMaxMs);saveGroupProactiveState(id,s);}
-async function callGroupProactive(groupId,accessCode,apiEndpoint){const g=groupById(groupId),state=loadGroupProactiveState(groupId);return fetchJsonWithRetry(endpointFor(apiEndpoint,"groupProactive"),{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({groupId,conversationId:g.conversationId,messages:recentHistoryForAPI(g.conversationId),sharedMemories:groupMemoriesForAPI(groupId),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,proactiveContext:{messagesToday:state.dailyCount,lastActivityAt:latestMessage(g.conversationId)?.createdAt||null}})});}
+async function callGroupProactive(groupId,accessCode,apiEndpoint,extraContext={}){
+  const g=groupById(groupId),state=loadGroupProactiveState(groupId);
+  return fetchJsonWithRetry(endpointFor(apiEndpoint,"groupProactive"),{
+    method:"POST",
+    headers:{"Content-Type":"application/json","X-App-Code":accessCode},
+    body:JSON.stringify({
+      groupId,
+      conversationId:g.conversationId,
+      messages:recentHistoryForAPI(g.conversationId),
+      sharedMemories:groupMemoriesForAPI(groupId),
+      currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),
+      timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+      proactiveContext:{
+        messagesToday:state.dailyCount,
+        lastActivityAt:latestMessage(g.conversationId)?.createdAt||null,
+        ...extraContext
+      }
+    })
+  });
+}
+
+async function cancelPendingGroupAutonomous(groupId){
+  if(!pushNotificationsEnabled())return 0;
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
+  if(!apiEndpoint||!accessCode)return 0;
+
+  try{
+    const result=await fetchJsonWithRetry(
+      endpointFor(apiEndpoint,"groupAutonomousCancel"),
+      {
+        method:"POST",
+        headers:pushAuthHeaders(accessCode),
+        body:JSON.stringify({
+          deviceId:getPushDeviceId(),
+          groupId
+        })
+      },
+      0
+    );
+    return Number(result?.cancelled||0);
+  }catch{
+    return 0;
+  }
+}
+
+function userIntervenedInGroupSince(conversationId,sinceMs){
+  const latest=latestMessage(conversationId);
+  if(!latest||latest.senderId!=="mashiro")return false;
+  const at=Date.parse(latest.createdAt||"");
+  return Number.isFinite(at)&&at>=sinceMs;
+}
+
 async function maybeSendGroupProactive(groupId){
-  if(document.visibilityState!=="visible")return;const g=groupById(groupId),state=loadGroupProactiveState(groupId);if(Date.now()<state.nextDueAt)return;if(isQuietTime()){scheduleGroupProactive(groupId);return;}if(state.dailyCount>=g.proactive.dailyMax){state.nextDueAt=nextMorningTimestamp();saveGroupProactiveState(groupId,state);return;}
-  const latestUser=latestMessage(g.conversationId,"mashiro"),latestAny=latestMessage(g.conversationId),now=Date.now();if(latestUser&&now-Date.parse(latestUser.createdAt)<g.proactive.recentUserCooldownMs){scheduleGroupProactive(groupId,"retry");return;}if(latestAny&&latestAny.senderId!=="mashiro"&&now-Date.parse(latestAny.createdAt)<g.proactive.recentGroupCooldownMs){scheduleGroupProactive(groupId);return;}
-  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();if(!apiEndpoint||!accessCode){scheduleGroupProactive(groupId,"retry");return;}await warmBackend(apiEndpoint);const show=appState.activeConversationId===g.conversationId&&!chatScreen.hidden;if(show)setTyping(true);
-  try{const result=await callGroupProactive(groupId,accessCode,apiEndpoint);if(show)setTyping(false);const replies=Array.isArray(result?.replies)?result.replies.slice(0,2):[];if(replies.length){for(const reply of replies){if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;if(show){setTyping(true,reply.speakerId);await sleep(500);setTyping(false);}addMessage(g.conversationId,reply.speakerId,String(reply.message).trim(),{source:"group-proactive",seenByUser:show});}state.lastSentAt=Date.now();state.dailyCount+=1;saveGroupProactiveState(groupId,state);scheduleGroupProactive(groupId);}else scheduleGroupProactive(groupId,"retry");}catch{if(show)setTyping(false);scheduleGroupProactive(groupId,"retry");}
+  if(document.visibilityState!=="visible")return;
+
+  const g=groupById(groupId),state=loadGroupProactiveState(groupId);
+  if(Date.now()<state.nextDueAt)return;
+  if(isQuietTime()){scheduleGroupProactive(groupId);return;}
+  if(state.dailyCount>=g.proactive.dailyMax){
+    state.nextDueAt=nextMorningTimestamp();
+    saveGroupProactiveState(groupId,state);
+    return;
+  }
+
+  const latestUser=latestMessage(g.conversationId,"mashiro");
+  const latestAny=latestMessage(g.conversationId);
+  const now=Date.now();
+
+  if(latestUser&&now-Date.parse(latestUser.createdAt)<g.proactive.recentUserCooldownMs){
+    scheduleGroupProactive(groupId,"retry");
+    return;
+  }
+
+  if(
+    latestAny &&
+    latestAny.senderId!=="mashiro" &&
+    now-Date.parse(latestAny.createdAt)<g.proactive.recentGroupCooldownMs
+  ){
+    scheduleGroupProactive(groupId);
+    return;
+  }
+
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
+  if(!apiEndpoint||!accessCode){
+    scheduleGroupProactive(groupId,"retry");
+    return;
+  }
+
+  await warmBackend(apiEndpoint);
+
+  const show=
+    appState.activeConversationId===g.conversationId &&
+    !chatScreen.hidden;
+  const sessionRequestedAt=Date.now();
+
+  if(show)setTyping(true);
+
+  try{
+    const result=await callGroupProactive(groupId,accessCode,apiEndpoint);
+    if(show)setTyping(false);
+
+    const replies=Array.isArray(result?.replies)?result.replies.slice(0,5):[];
+    if(!replies.length){
+      scheduleGroupProactive(groupId,"retry");
+      return;
+    }
+
+    let sentCount=0;
+
+    for(let index=0;index<replies.length;index+=1){
+      const reply=replies[index];
+      if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
+
+      // API待ちや会話途中でましろが入ってきたら、
+      // それ以降の自律会話は止める。
+      if(userIntervenedInGroupSince(g.conversationId,sessionRequestedAt)){
+        break;
+      }
+
+      if(index>0){
+        await sleep(1800+Math.min(2400,String(reply.message).length*25));
+        if(userIntervenedInGroupSince(g.conversationId,sessionRequestedAt)){
+          break;
+        }
+      }
+
+      if(show){
+        setTyping(true,reply.speakerId);
+        await sleep(650+Math.min(1000,String(reply.message).length*15));
+        setTyping(false);
+      }
+
+      addMessage(
+        g.conversationId,
+        reply.speakerId,
+        String(reply.message).trim(),
+        {
+          source:"group-autonomous",
+          seenByUser:show
+        }
+      );
+      sentCount+=1;
+    }
+
+    if(sentCount>0){
+      state.lastSentAt=Date.now();
+      state.dailyCount+=1;
+      saveGroupProactiveState(groupId,state);
+      scheduleGroupProactive(groupId);
+    }else{
+      scheduleGroupProactive(groupId,"retry");
+    }
+  }catch{
+    if(show)setTyping(false);
+    scheduleGroupProactive(groupId,"retry");
+  }
 }
 
 async function proactiveTick(){if(pushNotificationsEnabled())return;if(appState.proactiveBusy||document.visibilityState!=="visible")return;appState.proactiveBusy=true;try{const due=[];for(const id of Object.keys(CHARACTERS)){const s=loadDmProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"dm",id,due:s.nextDueAt});}for(const id of Object.keys(GROUPS)){const s=loadGroupProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"group",id,due:s.nextDueAt});}due.sort((a,b)=>a.due-b.due);const next=due[0];if(next){if(next.type==="dm")await maybeSendDmProactive(next.id);else await maybeSendGroupProactive(next.id);}}finally{appState.proactiveBusy=false;}}

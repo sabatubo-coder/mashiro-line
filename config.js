@@ -1,2 +1,2 @@
-// ましろLINE Phase 3.0.4 診断タイムスタンプ競合修正
+// ましろLINE Phase 3.1 グループLINE自律会話
 window.MASHIROLINE_API_ENDPOINT = "https://mashiro-line-backend-importzip--misomimizu.replit.app/api/chat";
