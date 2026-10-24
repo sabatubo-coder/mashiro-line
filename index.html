@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.7.2</title>
+  <title>ましろLINE（仮） Phase 2.7.3</title>
   <style>
 :root {
   color-scheme: light;
@@ -1270,7 +1270,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.7.2-reliability-long-dedup-rollover-v1";
+const PUSH_VERSION = "phase2.7.3-talk-list-sort-v1";
 
 
 const SELF_PROFILE = {
@@ -1554,10 +1554,59 @@ function formatListTime(iso){if(!iso)return"";const d=new Date(iso),n=new Date()
 function dayLabel(iso){const d=new Date(iso),t=new Date(),y=new Date(t);y.setDate(t.getDate()-1);const same=(a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();if(same(d,t))return"今日";if(same(d,y))return"昨日";return new Intl.DateTimeFormat("ja-JP",{month:"numeric",day:"numeric",weekday:"short"}).format(d);}
 function senderDisplayName(senderId){if(senderId==="mashiro")return getSelfDisplayName();return characterById(senderId)?getCharacterDisplayName(senderId):senderId;}
 
+function messageCreatedAtMs(message){
+  const ms=Date.parse(message?.createdAt||"");
+  return Number.isFinite(ms)?ms:0;
+}
+
+function latestConversationMessage(messages){
+  let latest=null;
+  let latestAt=0;
+  let latestIndex=-1;
+
+  for(let index=0;index<messages.length;index+=1){
+    const message=messages[index];
+    const at=messageCreatedAtMs(message);
+
+    // createdAtが同一の場合は、後から保存された方を最新として安定させる。
+    if(!latest||at>latestAt||(at===latestAt&&index>latestIndex)){
+      latest=message;
+      latestAt=at;
+      latestIndex=index;
+    }
+  }
+
+  return {message:latest,createdAtMs:latestAt};
+}
+
+function sortedTalkListEntries(){
+  return CONVERSATIONS.map((conversation,fixedIndex)=>{
+    const messages=loadConversationMessages(conversation.id);
+    const latest=latestConversationMessage(messages);
+    return {
+      conversation,
+      messages,
+      last:latest.message,
+      lastCreatedAtMs:latest.createdAtMs,
+      fixedIndex
+    };
+  }).sort((a,b)=>{
+    // メッセージがあるトークを最新時刻の降順で表示。
+    if(b.lastCreatedAtMs!==a.lastCreatedAtMs){
+      return b.lastCreatedAtMs-a.lastCreatedAtMs;
+    }
+
+    // 同時刻・メッセージなしの場合は従来の固定順を使い、
+    // 再描画のたびに順番が揺れないようにする。
+    return a.fixedIndex-b.fixedIndex;
+  });
+}
+
 function renderTalkList(){
   talkList.replaceChildren();
-  for(const conversation of CONVERSATIONS){
-    const messages=loadConversationMessages(conversation.id); const last=messages[messages.length-1]||null;
+
+  for(const entry of sortedTalkListEntries()){
+    const {conversation,messages,last}=entry;
     const unread=messages.filter(m=>m.senderId!=="mashiro"&&!m.seenByUser).length;
     const item=document.createElement("button");item.type="button";item.className="talk-item";item.dataset.conversationId=conversation.id;
     const avatar=document.createElement("div");applyConversationAvatar(avatar,conversation);
@@ -1569,8 +1618,9 @@ function renderTalkList(){
     main.append(top,preview);
     const side=document.createElement("div");side.className="talk-side";const time=document.createElement("div");time.className="talk-time";time.textContent=last?formatListTime(last.createdAt):"";side.appendChild(time);
     if(unread>0){const badge=document.createElement("div");badge.className="unread-badge";badge.textContent=unread>99?"99+":String(unread);side.appendChild(badge);}
-    item.append(avatar,main,side); item.addEventListener("click",()=>openConversation(conversation.id));talkList.appendChild(item);
+    item.append(avatar,main,side);item.addEventListener("click",()=>openConversation(conversation.id));talkList.appendChild(item);
   }
+
   updateAppBadgeFromLocal();
 }
 
