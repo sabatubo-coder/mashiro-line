@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.8</title>
+  <title>ましろLINE（仮） Phase 2.8.1</title>
   <style>
 :root {
   color-scheme: light;
@@ -1271,7 +1271,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
-const PUSH_VERSION = "phase2.8-reply-timing-read-delay-v1";
+const PUSH_VERSION = "phase2.8.1-background-read-badge-fix-v1";
 
 
 const SELF_PROFILE = {
@@ -1626,17 +1626,41 @@ function renderTalkList(){
   updateAppBadgeFromLocal();
 }
 
-function markIncomingSeen(conversationId){const msgs=loadConversationMessages(conversationId);let changed=false;for(const m of msgs){if(m.senderId!=="mashiro"&&!m.seenByUser){m.seenByUser=true;changed=true;}}if(changed)saveConversationMessages(conversationId,msgs);updateAppBadgeFromLocal();}
+function isConversationActuallyVisible(conversationId){
+  return Boolean(
+    conversationId&&
+    appState.activeConversationId===conversationId&&
+    !chatScreen.hidden&&
+    document.visibilityState==="visible"
+  );
+}
+
+function markIncomingSeen(conversationId,{force=false}={}){
+  if(!force&&!isConversationActuallyVisible(conversationId))return false;
+  const msgs=loadConversationMessages(conversationId);
+  let changed=false;
+  for(const m of msgs){
+    if(m.senderId!=="mashiro"&&!m.seenByUser){
+      m.seenByUser=true;
+      changed=true;
+    }
+  }
+  if(changed)saveConversationMessages(conversationId,msgs);
+  updateAppBadgeFromLocal();
+  return changed;
+}
 
 function openConversation(conversationId,pushHistory=true){
   const conversation=conversationById(conversationId);if(!conversation)return;
-  appState.activeConversationId=conversationId;markIncomingSeen(conversationId);
+  appState.activeConversationId=conversationId;
   if(conversation.type==="dm"){
     const c=characterById(conversation.characterId);chatTitle.textContent=getCharacterDisplayName(c.id);statusText.textContent="オンライン";typingLabel.textContent=`${getCharacterDisplayName(c.id)}が入力中…`;applyCharacterAvatar(headerAvatar,c.id);applyCharacterAvatar(typingAvatar,c.id);
   }else{
     const g=groupById(conversation.groupId);chatTitle.textContent=getGroupName(g.id);statusText.textContent="6人";typingLabel.textContent="誰かが入力中…";applyGroupAvatar(headerAvatar,g.id);applyGroupAvatar(typingAvatar,g.id);
   }
-  listScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;chatScreen.hidden=false;renderMessages();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);
+  listScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;chatScreen.hidden=false;
+  markIncomingSeen(conversationId);
+  renderMessages();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);
   if(pushHistory)history.pushState({conversationId},"",`#chat=${conversationId}`);
 }
 function showTalkList(pushHistory=true){appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
@@ -1795,9 +1819,31 @@ function setTyping(visible,speakerId=null){
 function autosizeInput(){messageInput.style.height="auto";messageInput.style.height=`${Math.min(messageInput.scrollHeight,120)}px`;sendButton.disabled=!messageInput.value.trim()||appState.isReplying||!appState.activeConversationId;}
 
 function addMessage(conversationId,senderId,text,options={}){
-  const conversation=conversationById(conversationId);const messages=loadConversationMessages(conversationId);const activeVisible=appState.activeConversationId===conversationId&&!chatScreen.hidden&&document.visibilityState==="visible";
-  const message={id:options.id||makeId(),pushEventId:options.pushEventId||null,senderId,text:String(text||"").trim(),createdAt:options.createdAt||new Date().toISOString(),readByCharacter:senderId==="mashiro"?Boolean(options.readByCharacter):true,seenByUser:senderId!=="mashiro"?(options.seenByUser??activeVisible):true,source:options.source||"ai"};
-  messages.push(message);saveConversationMessages(conversationId,messages);if(appState.activeConversationId===conversationId){if(senderId!=="mashiro")markIncomingSeen(conversationId);renderMessages();scrollToBottom();}renderTalkList();return message;
+  const conversation=conversationById(conversationId);
+  const messages=loadConversationMessages(conversationId);
+  const activeVisible=isConversationActuallyVisible(conversationId);
+  const message={
+    id:options.id||makeId(),
+    pushEventId:options.pushEventId||null,
+    senderId,
+    text:String(text||"").trim(),
+    createdAt:options.createdAt||new Date().toISOString(),
+    readByCharacter:senderId==="mashiro"?Boolean(options.readByCharacter):true,
+    seenByUser:senderId!=="mashiro"?(options.seenByUser??activeVisible):true,
+    source:options.source||"ai"
+  };
+
+  messages.push(message);
+  saveConversationMessages(conversationId,messages);
+
+  if(activeVisible){
+    if(senderId!=="mashiro")markIncomingSeen(conversationId);
+    renderMessages();
+    scrollToBottom();
+  }
+
+  renderTalkList();
+  return message;
 }
 function markOutgoingRead(conversationId){const messages=loadConversationMessages(conversationId);let changed=false;for(const m of messages){if(m.senderId==="mashiro"&&!m.readByCharacter){m.readByCharacter=true;changed=true;}}if(changed){saveConversationMessages(conversationId,messages);if(appState.activeConversationId===conversationId)renderMessages();renderTalkList();}}
 
@@ -1981,12 +2027,30 @@ function removeDelayedDmForConversation(conversationId){
   scheduleDelayedDmTimer();
 }
 
+function reconcileVisibleConversationUnread(){
+  const conversationId=appState.activeConversationId;
+  if(!conversationId||!isConversationActuallyVisible(conversationId))return;
+  markIncomingSeen(conversationId);
+  renderMessages();
+  renderTalkList();
+}
+
 function startDelayedDmScheduler(){
   processDelayedDmState();
   document.addEventListener("visibilitychange",()=>{
-    if(document.visibilityState==="visible")setTimeout(processDelayedDmState,250);
+    if(document.visibilityState==="visible"){
+      setTimeout(async()=>{
+        await processDelayedDmState();
+        reconcileVisibleConversationUnread();
+      },250);
+    }
   });
-  window.addEventListener("focus",()=>setTimeout(processDelayedDmState,250));
+  window.addEventListener("focus",()=>{
+    setTimeout(async()=>{
+      await processDelayedDmState();
+      reconcileVisibleConversationUnread();
+    },250);
+  });
 }
 
 function getAccessCode(){return localStorage.getItem(ACCESS_CODE_KEY)||"";}
