@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 3.0</title>
+  <title>ましろLINE（仮） Phase 3.0.1</title>
   <style>
 :root {
   color-scheme: light;
@@ -1271,7 +1271,7 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
-const PUSH_VERSION = "phase3.0-bunji-sosuke-life-models-v1";
+const PUSH_VERSION = "phase3.0.1-diagnostics-target-fix-v1";
 
 
 const SELF_PROFILE = {
@@ -2850,7 +2850,9 @@ function buildPushDiagnosticsBlock(){
   [
     ["natsuki","夏樹"],
     ["shiki","四季"],
-    ["ichi","イチ"]
+    ["ichi","イチ"],
+    ["bunji","ブンジ"],
+    ["sosuke","ソウスケ"]
   ].forEach(([value,label])=>{
     const option=document.createElement("option");
     option.value=value;

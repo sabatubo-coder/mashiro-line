@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-0-bunji-sosuke-life-v1";
+const CACHE_NAME = "mashiro-line-phase3-0-1-diagnostics-target-fix-v1";
 const ASSETS = [
   "./",
   "./index.html",
