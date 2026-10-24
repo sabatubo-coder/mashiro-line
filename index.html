@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 3.1</title>
+  <title>ましろLINE（仮） Phase 3.1.1</title>
   <style>
 :root {
   color-scheme: light;
@@ -1271,7 +1271,8 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
-const PUSH_VERSION = "phase3.1-group-autonomous-conversation-v1";
+const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
+const PUSH_VERSION = "phase3.1.1-group-read-reply-delay-v1";
 
 
 const SELF_PROFILE = {
@@ -1339,6 +1340,7 @@ const appState = {
   pushDiagnosticsBusy: false,
   pushDiagnosticsCharacterId: "natsuki",
   delayedDmTimer: null,
+  delayedGroupTimer: null,
   presenceTimer: null,
   presenceBusy: false,
   presenceRequestSeq: 0,
@@ -1803,6 +1805,90 @@ function openConversation(conversationId,pushHistory=true){
 }
 function showTalkList(pushHistory=true){appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
 
+
+function groupAiParticipantIds(group){
+  return (Array.isArray(group?.participants)?group.participants:[])
+    .filter(id=>id!=="mashiro"&&characterById(id));
+}
+
+function groupReadCount(message,group){
+  const valid=new Set(groupAiParticipantIds(group));
+  if(Array.isArray(message?.readByCharacters)){
+    return new Set(
+      message.readByCharacters.filter(id=>valid.has(id))
+    ).size;
+  }
+
+  // Phase 3.1.1以前の既存グループ送信メッセージとの互換。
+  if(message?.readByCharacter)return valid.size;
+  return 0;
+}
+
+function markGroupOutgoingReadThrough(
+  conversationId,
+  characterId,
+  throughCreatedAt,
+  readAtOverride=""
+){
+  const conversation=conversationById(conversationId);
+  if(!conversation||conversation.type!=="group"||!characterById(characterId))return false;
+
+  const group=groupById(conversation.groupId);
+  if(!groupAiParticipantIds(group).includes(characterId))return false;
+
+  const throughMs=Date.parse(throughCreatedAt||"");
+  const messages=loadConversationMessages(conversationId);
+  const readAt=
+    Number.isFinite(Date.parse(readAtOverride||""))
+      ?new Date(Date.parse(readAtOverride)).toISOString()
+      :new Date().toISOString();
+
+  let changed=false;
+
+  for(const message of messages){
+    if(message.senderId!=="mashiro")continue;
+
+    const createdMs=Date.parse(message.createdAt||"");
+    if(
+      Number.isFinite(throughMs)&&
+      Number.isFinite(createdMs)&&
+      createdMs>throughMs
+    ){
+      continue;
+    }
+
+    const readers=Array.isArray(message.readByCharacters)
+      ?[...message.readByCharacters]
+      :[];
+
+    if(!readers.includes(characterId)){
+      readers.push(characterId);
+      message.readByCharacters=readers;
+      message.readAtByCharacter={
+        ...(message.readAtByCharacter&&typeof message.readAtByCharacter==="object"
+          ?message.readAtByCharacter
+          :{}),
+        [characterId]:readAt
+      };
+
+      if(readers.length>=groupAiParticipantIds(group).length){
+        message.readByCharacter=true;
+        message.readAt=message.readAt||readAt;
+      }
+
+      changed=true;
+    }
+  }
+
+  if(changed){
+    saveConversationMessages(conversationId,messages);
+    if(appState.activeConversationId===conversationId)renderMessages();
+    renderTalkList();
+  }
+
+  return changed;
+}
+
 function renderMessages(){
   const conversation=activeConversation();if(!conversation)return;const messages=loadConversationMessages(conversation.id);messageList.replaceChildren();let previousDay="";
   for(const message of messages){
@@ -1813,7 +1899,20 @@ function renderMessages(){
     if(conversation.type==="group"&&!outgoing){const sender=document.createElement("div");sender.className="sender-name";sender.textContent=senderDisplayName(message.senderId);stack.appendChild(sender);}
     const bubble=document.createElement("div");bubble.className="bubble";bubble.textContent=message.text;
     const meta=document.createElement("div");meta.className="message-meta";
-    if(outgoing&&message.readByCharacter){const read=document.createElement("span");read.textContent=conversation.type==="group"?"既読 5":"既読";meta.appendChild(read);}
+    if(outgoing){
+      if(conversation.type==="group"){
+        const count=groupReadCount(message,groupById(conversation.groupId));
+        if(count>0){
+          const read=document.createElement("span");
+          read.textContent=`既読 ${count}`;
+          meta.appendChild(read);
+        }
+      }else if(message.readByCharacter){
+        const read=document.createElement("span");
+        read.textContent="既読";
+        meta.appendChild(read);
+      }
+    }
     const clock=document.createElement("span");clock.textContent=formatClock(message.createdAt);meta.appendChild(clock);stack.append(bubble,meta);row.appendChild(stack);messageList.appendChild(row);
   }
 }
@@ -1977,6 +2076,22 @@ function addMessage(conversationId,senderId,text,options={}){
     text:String(text||"").trim(),
     createdAt:options.createdAt||new Date().toISOString(),
     readByCharacter:senderId==="mashiro"?Boolean(options.readByCharacter):true,
+    readByCharacters:
+      senderId==="mashiro"&&conversation?.type==="group"
+        ?(
+            Array.isArray(options.readByCharacters)
+              ?[...new Set(options.readByCharacters.filter(id=>characterById(id)))]
+              :[]
+          )
+        :undefined,
+    readAtByCharacter:
+      senderId==="mashiro"&&conversation?.type==="group"
+        ?(
+            options.readAtByCharacter&&typeof options.readAtByCharacter==="object"
+              ?{...options.readAtByCharacter}
+              :{}
+          )
+        :undefined,
     seenByUser:senderId!=="mashiro"?(options.seenByUser??activeVisible):true,
     source:options.source||"ai"
   };
@@ -2239,6 +2354,248 @@ function startDelayedDmScheduler(){
   });
 }
 
+
+function loadDelayedGroupState(){
+  try{
+    const raw=localStorage.getItem(DELAYED_GROUP_STATE_KEY);
+    const parsed=raw?JSON.parse(raw):{};
+    return {
+      reads:Array.isArray(parsed.reads)?parsed.reads:[],
+      replies:Array.isArray(parsed.replies)?parsed.replies:[]
+    };
+  }catch{
+    return {reads:[],replies:[]};
+  }
+}
+
+function saveDelayedGroupState(state){
+  localStorage.setItem(
+    DELAYED_GROUP_STATE_KEY,
+    JSON.stringify({
+      reads:Array.isArray(state?.reads)?state.reads.slice(-300):[],
+      replies:Array.isArray(state?.replies)?state.replies.slice(-150):[]
+    })
+  );
+}
+
+function clearDelayedGroupReplyByEventId(eventId){
+  if(!eventId)return;
+  const state=loadDelayedGroupState();
+  const before=state.replies.length;
+  state.replies=state.replies.filter(item=>item?.eventId!==eventId);
+  if(state.replies.length!==before)saveDelayedGroupState(state);
+}
+
+function scheduleDelayedGroupTimer(){
+  clearTimeout(appState.delayedGroupTimer);
+
+  const state=loadDelayedGroupState();
+  const times=[
+    ...state.reads.map(item=>Date.parse(item?.readAt||"")),
+    ...state.replies.map(item=>Date.parse(item?.replyAt||""))
+  ].filter(Number.isFinite);
+
+  if(!times.length)return;
+
+  const next=Math.min(...times);
+  const delay=Math.max(250,Math.min(60*1000,next-Date.now()));
+  appState.delayedGroupTimer=setTimeout(processDelayedGroupState,delay);
+}
+
+async function processDelayedGroupState(){
+  const state=loadDelayedGroupState();
+  const now=Date.now();
+  let changed=false;
+
+  // 既読は各人物ごとに独立して増える。
+  const remainingReads=[];
+  for(const item of state.reads){
+    const due=Date.parse(item?.readAt||"");
+
+    if(Number.isFinite(due)&&due<=now){
+      markGroupOutgoingReadThrough(
+        item.conversationId,
+        item.characterId,
+        item.throughCreatedAt,
+        item.readAt
+      );
+      changed=true;
+    }else{
+      remainingReads.push(item);
+    }
+  }
+  state.reads=remainingReads;
+
+  // 返信は、その人物の既読を必ず付けてから表示する。
+  const sortedReplies=[...state.replies].sort(
+    (a,b)=>Date.parse(a?.replyAt||"")-Date.parse(b?.replyAt||"")
+  );
+  const remainingReplies=[];
+
+  for(const item of sortedReplies){
+    const due=Date.parse(item?.replyAt||"");
+
+    if(!Number.isFinite(due)||due>now){
+      remainingReplies.push(item);
+      continue;
+    }
+
+    const conversation=conversationById(item.conversationId);
+    if(!conversation||conversation.type!=="group"){
+      changed=true;
+      continue;
+    }
+
+    markGroupOutgoingReadThrough(
+      item.conversationId,
+      item.characterId,
+      item.throughCreatedAt,
+      item.readAt||item.replyAt
+    );
+
+    const existing=loadConversationMessages(item.conversationId)
+      .some(message=>
+        (item.eventId&&message.pushEventId===item.eventId)||
+        message.id===item.localMessageId
+      );
+
+    if(!existing&&String(item.reply||"").trim()){
+      const visible=
+        appState.activeConversationId===item.conversationId&&
+        !chatScreen.hidden&&
+        document.visibilityState==="visible";
+
+      if(visible){
+        setTyping(true,item.characterId);
+        await sleep(450+Math.min(850,String(item.reply).length*12));
+        setTyping(false);
+      }
+
+      addMessage(
+        item.conversationId,
+        item.characterId,
+        String(item.reply).trim(),
+        {
+          id:item.localMessageId,
+          pushEventId:item.eventId||null,
+          createdAt:item.replyAt,
+          source:item.eventId
+            ?"scheduled-group-reply-local"
+            :"delayed-group-reply-local",
+          seenByUser:visible
+        }
+      );
+    }
+
+    if(item.eventId)ackDelayedReplyEvent(item.eventId);
+    changed=true;
+  }
+
+  state.replies=remainingReplies;
+
+  if(changed)saveDelayedGroupState(state);
+  scheduleDelayedGroupTimer();
+}
+
+function enqueueDelayedGroupResult(conversation,userMessage,result){
+  const groupTiming=result?.groupTiming;
+  const replies=Array.isArray(result?.replies)?result.replies.slice(0,3):[];
+
+  if(
+    !groupTiming?.enabled ||
+    !Array.isArray(groupTiming.readTimings) ||
+    !replies.length
+  ){
+    return false;
+  }
+
+  const state=loadDelayedGroupState();
+  const tokenBase=`${conversation.id}-${userMessage.id}`;
+
+  // 同じユーザーメッセージに対する古い予約だけ除去。
+  state.reads=state.reads.filter(
+    item=>!String(item?.token||"").startsWith(`${tokenBase}-`)
+  );
+  state.replies=state.replies.filter(
+    item=>!String(item?.token||"").startsWith(`${tokenBase}-`)
+  );
+
+  for(const timing of groupTiming.readTimings){
+    if(
+      !characterById(timing?.characterId) ||
+      !timing?.readAt
+    )continue;
+
+    state.reads.push({
+      token:`${tokenBase}-read-${timing.characterId}`,
+      conversationId:conversation.id,
+      characterId:timing.characterId,
+      throughCreatedAt:userMessage.createdAt,
+      readAt:timing.readAt
+    });
+  }
+
+  for(let index=0;index<replies.length;index+=1){
+    const reply=replies[index];
+    const timing=reply?.replyTiming;
+    if(
+      !characterById(reply?.speakerId) ||
+      !String(reply?.message||"").trim() ||
+      !timing?.replyAt
+    )continue;
+
+    const eventId=reply?.scheduledReply?.eventId||null;
+    const token=`${tokenBase}-reply-${index}-${reply.speakerId}`;
+
+    state.replies.push({
+      token,
+      conversationId:conversation.id,
+      characterId:reply.speakerId,
+      throughCreatedAt:userMessage.createdAt,
+      reply:String(reply.message).trim(),
+      readAt:timing.readAt||"",
+      replyAt:timing.replyAt,
+      eventId,
+      localMessageId:eventId
+        ?`push-${eventId}`
+        :`delayed-group-${token}`
+    });
+  }
+
+  saveDelayedGroupState(state);
+  processDelayedGroupState();
+  return true;
+}
+
+function removeDelayedGroupForConversation(conversationId){
+  const state=loadDelayedGroupState();
+  state.reads=state.reads.filter(item=>item?.conversationId!==conversationId);
+  state.replies=state.replies.filter(item=>item?.conversationId!==conversationId);
+  saveDelayedGroupState(state);
+  scheduleDelayedGroupTimer();
+}
+
+function startDelayedGroupScheduler(){
+  processDelayedGroupState();
+
+  document.addEventListener("visibilitychange",()=>{
+    if(document.visibilityState==="visible"){
+      setTimeout(async()=>{
+        await processDelayedGroupState();
+        reconcileVisibleConversationUnread();
+      },300);
+    }
+  });
+
+  window.addEventListener("focus",()=>{
+    setTimeout(async()=>{
+      await processDelayedGroupState();
+      reconcileVisibleConversationUnread();
+    },300);
+  });
+}
+
+
 function getAccessCode(){return localStorage.getItem(ACCESS_CODE_KEY)||"";}
 function askForAccessCode(){return new Promise(resolve=>{accessCodeInput.value=getAccessCode();const cleanup=()=>{accessForm.removeEventListener("submit",onSubmit);accessCancel.removeEventListener("click",onCancel);accessDialog.removeEventListener("cancel",onCancel);};const onSubmit=e=>{e.preventDefault();const code=accessCodeInput.value.trim();if(!code){showToast("接続コードを入力してください");return;}localStorage.setItem(ACCESS_CODE_KEY,code);cleanup();accessDialog.close();resolve(code);};const onCancel=e=>{e?.preventDefault?.();cleanup();accessDialog.close();resolve("");};accessForm.addEventListener("submit",onSubmit);accessCancel.addEventListener("click",onCancel);accessDialog.addEventListener("cancel",onCancel);accessDialog.showModal();setTimeout(()=>accessCodeInput.focus(),50);});}
 function normalizeBackendUrl(value){const raw=String(value||"").trim().replace(/\/+$/,"");if(!/^https:\/\//i.test(raw))return"";return `${raw}/api/chat`;}
@@ -2271,7 +2628,33 @@ async function fetchJsonWithRetry(endpoint,options,retries=1){let lastError;for(
 
 async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages:recentHistoryForAPI(conversation.id),memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true})});}
 function privateMemoriesForGroup(group){const map={};for(const id of group.participants){if(id!=="mashiro"&&characterById(id))map[id]=memoriesForAPI(id);}return map;}
-async function callGroupChat(conversation,accessCode,apiEndpoint){const group=groupById(conversation.groupId);return fetchJsonWithRetry(endpointFor(apiEndpoint,"groupChat"),{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({groupId:group.id,conversationId:conversation.id,messages:recentHistoryForAPI(conversation.id),sharedMemories:groupMemoriesForAPI(group.id),privateMemoriesByCharacter:privateMemoriesForGroup(group),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone})});}
+async function callGroupChat(conversation,accessCode,apiEndpoint){
+  const group=groupById(conversation.groupId);
+  return fetchJsonWithRetry(
+    endpointFor(apiEndpoint,"groupChat"),
+    {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "X-App-Code":accessCode
+      },
+      body:JSON.stringify({
+        groupId:group.id,
+        conversationId:conversation.id,
+        messages:recentHistoryForAPI(conversation.id),
+        sharedMemories:groupMemoriesForAPI(group.id),
+        privateMemoriesByCharacter:privateMemoriesForGroup(group),
+        currentTime:new Date().toLocaleString(
+          "ja-JP",
+          {dateStyle:"full",timeStyle:"short"}
+        ),
+        timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+        deviceId:pushNotificationsEnabled()?getPushDeviceId():"",
+        scheduleDelayedReply:true
+      })
+    }
+  );
+}
 
 async function sendUserMessage(){
   const conversation=activeConversation();const text=messageInput.value.trim();if(!conversation||!text||appState.isReplying)return;
@@ -2318,25 +2701,44 @@ async function sendUserMessage(){
       // 自律会話の続きはキャンセルし、今回の発言への返信を優先する。
       await cancelPendingGroupAutonomous(conversation.groupId);
 
-      await sleep(350);
-      markOutgoingRead(conversation.id);
-      setTyping(true);
-      const result=await callGroupChat(conversation,accessCode,apiEndpoint);
-      setTyping(false);
-      const replies=Array.isArray(result.replies)?result.replies.slice(0,3):[];
-      for(const reply of replies){
-        if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
-        setTyping(true,reply.speakerId);
-        await sleep(550+Math.min(850,String(reply.message).length*12));
+      const result=await callGroupChat(
+        conversation,
+        accessCode,
+        apiEndpoint
+      );
+
+      if(
+        result?.groupTiming &&
+        enqueueDelayedGroupResult(conversation,userMessage,result)
+      ){
+        // Phase 3.1.1:
+        // 既読・返信は各キャラの生活モデル時刻に従って後から反映。
+      }else{
+        // 互換フォールバック。新Backendが使えない場合だけ従来動作。
+        await sleep(350);
+        markOutgoingRead(conversation.id);
+        setTyping(true);
+        const replies=Array.isArray(result.replies)?result.replies.slice(0,3):[];
         setTyping(false);
-        addMessage(
-          conversation.id,
-          reply.speakerId,
-          String(reply.message).trim(),
-          {source:"group-ai",seenByUser:true}
-        );
+
+        for(const reply of replies){
+          if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
+          setTyping(true,reply.speakerId);
+          await sleep(550+Math.min(850,String(reply.message).length*12));
+          setTyping(false);
+          addMessage(
+            conversation.id,
+            reply.speakerId,
+            String(reply.message).trim(),
+            {source:"group-ai-fallback",seenByUser:true}
+          );
+        }
       }
-      mergeGroupMemoryCandidates(conversation.groupId,result.groupMemoryCandidates);
+
+      mergeGroupMemoryCandidates(
+        conversation.groupId,
+        result.groupMemoryCandidates
+      );
       scheduleGroupProactive(conversation.groupId,"normal");
     }
   }catch(error){
@@ -3048,6 +3450,7 @@ async function pullPendingPushMessages(){
         });
       }
       clearDelayedReplyByEventId(event.eventId);
+      clearDelayedGroupReplyByEventId(event.eventId);
       ackIds.push(event.eventId);
     }
 
@@ -3398,7 +3801,7 @@ async function maybeSendGroupProactive(groupId){
 async function proactiveTick(){if(pushNotificationsEnabled())return;if(appState.proactiveBusy||document.visibilityState!=="visible")return;appState.proactiveBusy=true;try{const due=[];for(const id of Object.keys(CHARACTERS)){const s=loadDmProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"dm",id,due:s.nextDueAt});}for(const id of Object.keys(GROUPS)){const s=loadGroupProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"group",id,due:s.nextDueAt});}due.sort((a,b)=>a.due-b.due);const next=due[0];if(next){if(next.type==="dm")await maybeSendDmProactive(next.id);else await maybeSendGroupProactive(next.id);}}finally{appState.proactiveBusy=false;}}
 function startProactiveScheduler(){clearInterval(appState.proactiveTimer);setTimeout(proactiveTick,1500);appState.proactiveTimer=setInterval(proactiveTick,60*1000);document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")setTimeout(proactiveTick,700);});window.addEventListener("focus",()=>setTimeout(proactiveTick,700));}
 
-async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);removeDelayedDmForConversation(conversation.id);saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
+async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);removeDelayedDmForConversation(conversation.id);removeDelayedGroupForConversation(conversation.id);saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
 
 composer.addEventListener("submit",e=>{e.preventDefault();sendUserMessage();});
 messageInput.addEventListener("input",autosizeInput);messageInput.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();composer.requestSubmit();}});
@@ -3437,7 +3840,7 @@ migrateLegacyNatsukiData();
 const initialChatMatch=location.hash.match(/^#chat=([^&]+)$/);
 const initialConversationId=initialChatMatch?decodeURIComponent(initialChatMatch[1]):"";
 history.replaceState({list:true},"",location.pathname+location.search);
-renderTalkList();showTalkList(false);autosizeInput();registerServiceWorker();startDelayedDmScheduler();startPresenceScheduler();startProactiveScheduler();startPushBridge();
+renderTalkList();showTalkList(false);autosizeInput();registerServiceWorker();startDelayedDmScheduler();startDelayedGroupScheduler();startPresenceScheduler();startProactiveScheduler();startPushBridge();
 if(initialConversationId&&conversationById(initialConversationId)){
   setTimeout(()=>{openConversation(initialConversationId,false);history.replaceState({conversationId:initialConversationId},"",`#chat=${encodeURIComponent(initialConversationId)}`);},250);
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-1-group-autonomous-conversation-v1";
+const CACHE_NAME = "mashiro-line-phase3-1-1-group-read-reply-delay-v1";
 const ASSETS = [
   "./",
   "./index.html",
