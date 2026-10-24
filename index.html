@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 3.1.1</title>
+  <title>ましろLINE（仮） Phase 3.1.2</title>
   <style>
 :root {
   color-scheme: light;
@@ -1272,7 +1272,7 @@ const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
-const PUSH_VERSION = "phase3.1.1-group-read-reply-delay-v1";
+const PUSH_VERSION = "phase3.1.2-legacy-group-read-compatibility-fix-v1";
 
 
 const SELF_PROFILE = {
@@ -1819,7 +1819,7 @@ function groupReadCount(message,group){
     ).size;
   }
 
-  // Phase 3.1.1以前の既存グループ送信メッセージとの互換。
+  // Phase 3.1.2以前の既存グループ送信メッセージとの互換。
   if(message?.readByCharacter)return valid.size;
   return 0;
 }
@@ -1847,6 +1847,34 @@ function markGroupOutgoingReadThrough(
 
   for(const message of messages){
     if(message.senderId!=="mashiro")continue;
+
+    // Phase 3.1.2: 旧方式で既に全員既読なら、その状態を維持する。
+    if(message.readByCharacter===true){
+      const allReaders=groupAiParticipantIds(group);
+      const current=Array.isArray(message.readByCharacters)
+        ?message.readByCharacters
+        :[];
+      const merged=[...new Set([...allReaders,...current])];
+
+      if(
+        !Array.isArray(message.readByCharacters) ||
+        merged.length!==current.length
+      ){
+        message.readByCharacters=merged;
+        message.readAtByCharacter={
+          ...(message.readAtByCharacter&&typeof message.readAtByCharacter==="object"
+            ?message.readAtByCharacter
+            :{})
+        };
+        for(const readerId of allReaders){
+          if(!message.readAtByCharacter[readerId]){
+            message.readAtByCharacter[readerId]=message.readAt||readAt;
+          }
+        }
+        changed=true;
+      }
+      continue;
+    }
 
     const createdMs=Date.parse(message.createdAt||"");
     if(
@@ -1889,8 +1917,54 @@ function markGroupOutgoingReadThrough(
   return changed;
 }
 
+
+function migrateLegacyGroupReadState(conversationId){
+  const conversation=conversationById(conversationId);
+  if(!conversation||conversation.type!=="group")return false;
+
+  const group=groupById(conversation.groupId);
+  const allReaders=groupAiParticipantIds(group);
+  const messages=loadConversationMessages(conversationId);
+  let changed=false;
+
+  for(const message of messages){
+    if(message.senderId!=="mashiro"||message.readByCharacter!==true)continue;
+
+    const current=Array.isArray(message.readByCharacters)
+      ?message.readByCharacters
+      :[];
+    const merged=[...new Set([...allReaders,...current])];
+
+    if(
+      !Array.isArray(message.readByCharacters) ||
+      merged.length!==current.length
+    ){
+      message.readByCharacters=merged;
+      message.readAtByCharacter={
+        ...(message.readAtByCharacter&&typeof message.readAtByCharacter==="object"
+          ?message.readAtByCharacter
+          :{})
+      };
+      for(const readerId of allReaders){
+        if(!message.readAtByCharacter[readerId]){
+          message.readAtByCharacter[readerId]=
+            message.readAt||
+            message.createdAt||
+            new Date().toISOString();
+        }
+      }
+      changed=true;
+    }
+  }
+
+  if(changed)saveConversationMessages(conversationId,messages);
+  return changed;
+}
+
 function renderMessages(){
-  const conversation=activeConversation();if(!conversation)return;const messages=loadConversationMessages(conversation.id);messageList.replaceChildren();let previousDay="";
+  const conversation=activeConversation();if(!conversation)return;
+  if(conversation.type==="group")migrateLegacyGroupReadState(conversation.id);
+  const messages=loadConversationMessages(conversation.id);messageList.replaceChildren();let previousDay="";
   for(const message of messages){
     const currentDay=dayLabel(message.createdAt);if(currentDay!==previousDay){const divider=document.createElement("div");divider.className="day-divider";const span=document.createElement("span");span.textContent=currentDay;divider.appendChild(span);messageList.appendChild(divider);previousDay=currentDay;}
     const outgoing=message.senderId==="mashiro";const row=document.createElement("div");row.className=`message-row ${outgoing?"outgoing":"incoming"}`;
@@ -2711,7 +2785,7 @@ async function sendUserMessage(){
         result?.groupTiming &&
         enqueueDelayedGroupResult(conversation,userMessage,result)
       ){
-        // Phase 3.1.1:
+        // Phase 3.1.2:
         // 既読・返信は各キャラの生活モデル時刻に従って後から反映。
       }else{
         // 互換フォールバック。新Backendが使えない場合だけ従来動作。
