@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 2.7.3</title>
+  <title>ましろLINE（仮） Phase 2.8</title>
   <style>
 :root {
   color-scheme: light;
@@ -1270,7 +1270,8 @@ const CONFIGURED_API_ENDPOINT = window.MASHIROLINE_API_ENDPOINT || "";
 
 const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
-const PUSH_VERSION = "phase2.7.3-talk-list-sort-v1";
+const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
+const PUSH_VERSION = "phase2.8-reply-timing-read-delay-v1";
 
 
 const SELF_PROFILE = {
@@ -1336,7 +1337,8 @@ const appState = {
   pushBridgeBusy: false,
   pushDiagnosticsData: null,
   pushDiagnosticsBusy: false,
-  pushDiagnosticsCharacterId: "natsuki"
+  pushDiagnosticsCharacterId: "natsuki",
+  delayedDmTimer: null
 };
 
 const listScreen = document.getElementById("listScreen");
@@ -1799,6 +1801,194 @@ function addMessage(conversationId,senderId,text,options={}){
 }
 function markOutgoingRead(conversationId){const messages=loadConversationMessages(conversationId);let changed=false;for(const m of messages){if(m.senderId==="mashiro"&&!m.readByCharacter){m.readByCharacter=true;changed=true;}}if(changed){saveConversationMessages(conversationId,messages);if(appState.activeConversationId===conversationId)renderMessages();renderTalkList();}}
 
+
+function markOutgoingReadThrough(conversationId,throughCreatedAt){
+  const throughMs=Date.parse(throughCreatedAt||"");
+  const messages=loadConversationMessages(conversationId);
+  let changed=false;
+  for(const message of messages){
+    if(message.senderId!=="mashiro"||message.readByCharacter)continue;
+    const createdMs=Date.parse(message.createdAt||"");
+    if(!Number.isFinite(throughMs)||!Number.isFinite(createdMs)||createdMs<=throughMs){
+      message.readByCharacter=true;
+      changed=true;
+    }
+  }
+  if(changed){
+    saveConversationMessages(conversationId,messages);
+    if(appState.activeConversationId===conversationId)renderMessages();
+    renderTalkList();
+  }
+}
+
+function loadDelayedDmState(){
+  try{
+    const raw=localStorage.getItem(DELAYED_DM_STATE_KEY);
+    const parsed=raw?JSON.parse(raw):{};
+    return {
+      reads:Array.isArray(parsed.reads)?parsed.reads:[],
+      replies:Array.isArray(parsed.replies)?parsed.replies:[]
+    };
+  }catch{
+    return {reads:[],replies:[]};
+  }
+}
+
+function saveDelayedDmState(state){
+  localStorage.setItem(DELAYED_DM_STATE_KEY,JSON.stringify({
+    reads:Array.isArray(state?.reads)?state.reads.slice(-100):[],
+    replies:Array.isArray(state?.replies)?state.replies.slice(-100):[]
+  }));
+}
+
+async function ackDelayedReplyEvent(eventId){
+  if(!eventId||!pushNotificationsEnabled())return;
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
+  if(!apiEndpoint||!accessCode)return;
+  try{
+    await fetchJsonWithRetry(endpointFor(apiEndpoint,"pushAck"),{
+      method:"POST",
+      headers:pushAuthHeaders(accessCode),
+      body:JSON.stringify({
+        deviceId:getPushDeviceId(),
+        eventIds:[eventId]
+      })
+    },0);
+  }catch{}
+}
+
+function clearDelayedReplyByEventId(eventId){
+  if(!eventId)return;
+  const state=loadDelayedDmState();
+  const before=state.replies.length;
+  state.replies=state.replies.filter(item=>item?.eventId!==eventId);
+  if(state.replies.length!==before)saveDelayedDmState(state);
+}
+
+function scheduleDelayedDmTimer(){
+  clearTimeout(appState.delayedDmTimer);
+  const state=loadDelayedDmState();
+  const times=[
+    ...state.reads.map(item=>Date.parse(item?.readAt||"")),
+    ...state.replies.map(item=>Date.parse(item?.replyAt||""))
+  ].filter(Number.isFinite);
+
+  if(!times.length)return;
+  const next=Math.min(...times);
+  const delay=Math.max(250,Math.min(60*1000,next-Date.now()));
+  appState.delayedDmTimer=setTimeout(processDelayedDmState,delay);
+}
+
+async function processDelayedDmState(){
+  const state=loadDelayedDmState();
+  const now=Date.now();
+  let changed=false;
+
+  const remainingReads=[];
+  for(const item of state.reads){
+    const due=Date.parse(item?.readAt||"");
+    if(Number.isFinite(due)&&due<=now){
+      markOutgoingReadThrough(item.conversationId,item.throughCreatedAt);
+      changed=true;
+    }else remainingReads.push(item);
+  }
+  state.reads=remainingReads;
+
+  const remainingReplies=[];
+  for(const item of state.replies){
+    const due=Date.parse(item?.replyAt||"");
+    if(!Number.isFinite(due)||due>now){
+      remainingReplies.push(item);
+      continue;
+    }
+
+    const conversation=conversationById(item.conversationId);
+    if(!conversation){
+      changed=true;
+      continue;
+    }
+
+    const existing=loadConversationMessages(item.conversationId)
+      .some(message=>
+        (item.eventId&&message.pushEventId===item.eventId)||
+        message.id===item.localMessageId
+      );
+
+    if(!existing&&String(item.reply||"").trim()){
+      addMessage(
+        item.conversationId,
+        item.characterId,
+        String(item.reply).trim(),
+        {
+          id:item.localMessageId,
+          pushEventId:item.eventId||null,
+          createdAt:item.replyAt,
+          source:item.eventId?"scheduled-reply-local":"delayed-reply-local",
+          seenByUser:
+            appState.activeConversationId===item.conversationId&&
+            !chatScreen.hidden&&
+            document.visibilityState==="visible"
+        }
+      );
+    }
+
+    if(item.eventId)ackDelayedReplyEvent(item.eventId);
+    changed=true;
+  }
+  state.replies=remainingReplies;
+
+  if(changed)saveDelayedDmState(state);
+  scheduleDelayedDmTimer();
+}
+
+function enqueueDelayedDmResult(conversation,userMessage,result){
+  const timing=result?.replyTiming;
+  if(!timing?.readAt||!timing?.replyAt||!String(result?.reply||"").trim())return false;
+
+  const state=loadDelayedDmState();
+  const token=`${conversation.id}-${userMessage.id}`;
+
+  state.reads=state.reads.filter(item=>item?.token!==token);
+  state.reads.push({
+    token,
+    conversationId:conversation.id,
+    throughCreatedAt:userMessage.createdAt,
+    readAt:timing.readAt
+  });
+
+  const eventId=result?.scheduledReply?.eventId||null;
+  state.replies=state.replies.filter(item=>item?.token!==token);
+  state.replies.push({
+    token,
+    conversationId:conversation.id,
+    characterId:conversation.characterId,
+    reply:String(result.reply).trim(),
+    replyAt:timing.replyAt,
+    eventId,
+    localMessageId:eventId?`push-${eventId}`:`delayed-${token}`
+  });
+
+  saveDelayedDmState(state);
+  processDelayedDmState();
+  return true;
+}
+
+function removeDelayedDmForConversation(conversationId){
+  const state=loadDelayedDmState();
+  state.reads=state.reads.filter(item=>item?.conversationId!==conversationId);
+  state.replies=state.replies.filter(item=>item?.conversationId!==conversationId);
+  saveDelayedDmState(state);
+  scheduleDelayedDmTimer();
+}
+
+function startDelayedDmScheduler(){
+  processDelayedDmState();
+  document.addEventListener("visibilitychange",()=>{
+    if(document.visibilityState==="visible")setTimeout(processDelayedDmState,250);
+  });
+  window.addEventListener("focus",()=>setTimeout(processDelayedDmState,250));
+}
+
 function getAccessCode(){return localStorage.getItem(ACCESS_CODE_KEY)||"";}
 function askForAccessCode(){return new Promise(resolve=>{accessCodeInput.value=getAccessCode();const cleanup=()=>{accessForm.removeEventListener("submit",onSubmit);accessCancel.removeEventListener("click",onCancel);accessDialog.removeEventListener("cancel",onCancel);};const onSubmit=e=>{e.preventDefault();const code=accessCodeInput.value.trim();if(!code){showToast("接続コードを入力してください");return;}localStorage.setItem(ACCESS_CODE_KEY,code);cleanup();accessDialog.close();resolve(code);};const onCancel=e=>{e?.preventDefault?.();cleanup();accessDialog.close();resolve("");};accessForm.addEventListener("submit",onSubmit);accessCancel.addEventListener("click",onCancel);accessDialog.addEventListener("cancel",onCancel);accessDialog.showModal();setTimeout(()=>accessCodeInput.focus(),50);});}
 function normalizeBackendUrl(value){const raw=String(value||"").trim().replace(/\/+$/,"");if(!/^https:\/\//i.test(raw))return"";return `${raw}/api/chat`;}
@@ -1827,26 +2017,84 @@ function recentHistoryForAPI(conversationId){return loadConversationMessages(con
 
 async function fetchJsonWithRetry(endpoint,options,retries=1){let lastError;for(let attempt=0;attempt<=retries;attempt++){const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),60000);try{const response=await fetch(endpoint,{...options,signal:controller.signal,cache:"no-store"});const data=await response.json().catch(()=>({}));if(response.status===401){localStorage.removeItem(ACCESS_CODE_KEY);throw Object.assign(new Error("invalid_app_code"),{code:"invalid_app_code"});}if(!response.ok){const e=Object.assign(new Error(String(data?.error||`http_${response.status}`)),{code:[429,500,502,503,504].includes(response.status)?"temporary_error":response.status===403?"origin_not_allowed":"api_error"});throw e;}return data;}catch(error){lastError=error;const retryable=error?.name==="AbortError"||error instanceof TypeError||error?.code==="temporary_error";if(!retryable||attempt===retries)throw error;await sleep(1800);}finally{clearTimeout(timeout);}}throw lastError;}
 
-async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages:recentHistoryForAPI(conversation.id),memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone})});}
+async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages:recentHistoryForAPI(conversation.id),memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true})});}
 function privateMemoriesForGroup(group){const map={};for(const id of group.participants){if(id!=="mashiro"&&characterById(id))map[id]=memoriesForAPI(id);}return map;}
 async function callGroupChat(conversation,accessCode,apiEndpoint){const group=groupById(conversation.groupId);return fetchJsonWithRetry(endpointFor(apiEndpoint,"groupChat"),{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({groupId:group.id,conversationId:conversation.id,messages:recentHistoryForAPI(conversation.id),sharedMemories:groupMemoriesForAPI(group.id),privateMemoriesByCharacter:privateMemoriesForGroup(group),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone})});}
 
 async function sendUserMessage(){
   const conversation=activeConversation();const text=messageInput.value.trim();if(!conversation||!text||appState.isReplying)return;
-  addMessage(conversation.id,"mashiro",text,{readByCharacter:false,source:"user"});messageInput.value="";autosizeInput();appState.isReplying=true;sendButton.disabled=true;await sleep(350);markOutgoingRead(conversation.id);setTyping(true);
-  const apiEndpoint=getApiEndpoint();if(!apiEndpoint){setTyping(false);appState.isReplying=false;autosizeInput();showToast("AIバックエンドURLが設定されていません");return;}
-  let accessCode=getAccessCode();if(!accessCode)accessCode=await askForAccessCode();if(!accessCode){setTyping(false);appState.isReplying=false;autosizeInput();return;}
+  const userMessage=addMessage(conversation.id,"mashiro",text,{readByCharacter:false,source:"user"});
+  messageInput.value="";autosizeInput();appState.isReplying=true;sendButton.disabled=true;
+
+  const apiEndpoint=getApiEndpoint();
+  if(!apiEndpoint){
+    appState.isReplying=false;autosizeInput();showToast("AIバックエンドURLが設定されていません");return;
+  }
+
+  let accessCode=getAccessCode();
+  if(!accessCode)accessCode=await askForAccessCode();
+  if(!accessCode){
+    appState.isReplying=false;autosizeInput();return;
+  }
+
   await warmBackend(apiEndpoint);
+
   try{
     if(conversation.type==="dm"){
-      const result=await callDmChat(conversation,accessCode,apiEndpoint);await sleep(650);setTyping(false);addMessage(conversation.id,conversation.characterId,String(result.reply||"").trim(),{source:"ai",seenByUser:true});mergeMemoryCandidates(conversation.characterId,result.memoryCandidates);scheduleDmProactive(conversation.characterId,"normal");
+      const result=await callDmChat(conversation,accessCode,apiEndpoint);
+      mergeMemoryCandidates(conversation.characterId,result.memoryCandidates);
+
+      if(result?.replyTiming&&enqueueDelayedDmResult(conversation,userMessage,result)){
+        scheduleDmProactive(conversation.characterId,"normal");
+      }else{
+        // 生活モデル未対応キャラは従来どおり短い即時返信。
+        await sleep(350);
+        markOutgoingReadThrough(conversation.id,userMessage.createdAt);
+        setTyping(true);
+        await sleep(650);
+        setTyping(false);
+        addMessage(
+          conversation.id,
+          conversation.characterId,
+          String(result.reply||"").trim(),
+          {source:"ai",seenByUser:true}
+        );
+        scheduleDmProactive(conversation.characterId,"normal");
+      }
     }else{
-      const result=await callGroupChat(conversation,accessCode,apiEndpoint);setTyping(false);const replies=Array.isArray(result.replies)?result.replies.slice(0,3):[];
-      for(const reply of replies){if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;setTyping(true,reply.speakerId);await sleep(550+Math.min(850,String(reply.message).length*12));setTyping(false);addMessage(conversation.id,reply.speakerId,String(reply.message).trim(),{source:"group-ai",seenByUser:true});}
-      mergeGroupMemoryCandidates(conversation.groupId,result.groupMemoryCandidates);scheduleGroupProactive(conversation.groupId,"normal");
+      await sleep(350);
+      markOutgoingRead(conversation.id);
+      setTyping(true);
+      const result=await callGroupChat(conversation,accessCode,apiEndpoint);
+      setTyping(false);
+      const replies=Array.isArray(result.replies)?result.replies.slice(0,3):[];
+      for(const reply of replies){
+        if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
+        setTyping(true,reply.speakerId);
+        await sleep(550+Math.min(850,String(reply.message).length*12));
+        setTyping(false);
+        addMessage(
+          conversation.id,
+          reply.speakerId,
+          String(reply.message).trim(),
+          {source:"group-ai",seenByUser:true}
+        );
+      }
+      mergeGroupMemoryCandidates(conversation.groupId,result.groupMemoryCandidates);
+      scheduleGroupProactive(conversation.groupId,"normal");
     }
-  }catch(error){setTyping(false);if(error?.code==="invalid_app_code"){showToast("接続コードが違います。もう一度入力してください");await askForAccessCode();}else showToast("AIに接続できませんでした。少し待ってもう一度試してください");}
-  finally{appState.isReplying=false;autosizeInput();}
+  }catch(error){
+    setTyping(false);
+    if(error?.code==="invalid_app_code"){
+      showToast("接続コードが違います。もう一度入力してください");
+      await askForAccessCode();
+    }else{
+      showToast("AIに接続できませんでした。少し待ってもう一度試してください");
+    }
+  }finally{
+    appState.isReplying=false;
+    autosizeInput();
+  }
 }
 
 
@@ -2213,6 +2461,16 @@ function pushDiagnosticsText(data){
     `Push再送待ち: ${n.pendingPushRetryCount??0}件`
   ];
 
+  if(n.replyTimingModel?.enabled){
+    lines.push(
+      "",
+      "返信タイミング・既読遅延: 有効",
+      `現在の生活状態での返信理由: ${n.replyTimingModel.reason||"不明"}`,
+      `既読までの目安: ${formatDiagnosticDuration(n.replyTimingModel.readDelayMs)}`,
+      `返信までの目安: ${formatDiagnosticDuration(n.replyTimingModel.replyDelayMs)}`
+    );
+  }
+
   if(data.characterId==="shiki"){
     const o=n.observation;
     lines.push(
@@ -2433,6 +2691,7 @@ async function pullPendingPushMessages(){
           seenByUser:appState.activeConversationId===conversation.id&&!chatScreen.hidden&&document.visibilityState==="visible"
         });
       }
+      clearDelayedReplyByEventId(event.eventId);
       ackIds.push(event.eventId);
     }
 
@@ -2626,7 +2885,7 @@ async function maybeSendGroupProactive(groupId){
 async function proactiveTick(){if(pushNotificationsEnabled())return;if(appState.proactiveBusy||document.visibilityState!=="visible")return;appState.proactiveBusy=true;try{const due=[];for(const id of Object.keys(CHARACTERS)){const s=loadDmProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"dm",id,due:s.nextDueAt});}for(const id of Object.keys(GROUPS)){const s=loadGroupProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"group",id,due:s.nextDueAt});}due.sort((a,b)=>a.due-b.due);const next=due[0];if(next){if(next.type==="dm")await maybeSendDmProactive(next.id);else await maybeSendGroupProactive(next.id);}}finally{appState.proactiveBusy=false;}}
 function startProactiveScheduler(){clearInterval(appState.proactiveTimer);setTimeout(proactiveTick,1500);appState.proactiveTimer=setInterval(proactiveTick,60*1000);document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")setTimeout(proactiveTick,700);});window.addEventListener("focus",()=>setTimeout(proactiveTick,700));}
 
-async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
+async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);removeDelayedDmForConversation(conversation.id);saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
 
 composer.addEventListener("submit",e=>{e.preventDefault();sendUserMessage();});
 messageInput.addEventListener("input",autosizeInput);messageInput.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();composer.requestSubmit();}});
@@ -2665,7 +2924,7 @@ migrateLegacyNatsukiData();
 const initialChatMatch=location.hash.match(/^#chat=([^&]+)$/);
 const initialConversationId=initialChatMatch?decodeURIComponent(initialChatMatch[1]):"";
 history.replaceState({list:true},"",location.pathname+location.search);
-renderTalkList();showTalkList(false);autosizeInput();registerServiceWorker();startProactiveScheduler();startPushBridge();
+renderTalkList();showTalkList(false);autosizeInput();registerServiceWorker();startDelayedDmScheduler();startProactiveScheduler();startPushBridge();
 if(initialConversationId&&conversationById(initialConversationId)){
   setTimeout(()=>{openConversation(initialConversationId,false);history.replaceState({conversationId:initialConversationId},"",`#chat=${encodeURIComponent(initialConversationId)}`);},250);
 }
