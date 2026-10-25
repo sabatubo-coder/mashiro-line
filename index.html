@@ -1416,7 +1416,7 @@ const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
-const PUSH_VERSION = "phase3.2.1-sticker-image-swap-v1";
+const PUSH_VERSION = "phase3.2.2-active-conversation-session-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -3619,6 +3619,24 @@ function pushDiagnosticsText(data){
       `現在の生活状態での返信理由: ${n.replyTimingModel.reason||"不明"}`,
       `既読までの目安: ${formatDiagnosticDuration(n.replyTimingModel.readDelayMs)}`,
       `返信までの目安: ${formatDiagnosticDuration(n.replyTimingModel.replyDelayMs)}`
+    );
+  }
+
+  if(n.activeConversationSessionProfile?.enabled){
+    const activeProfile=n.activeConversationSessionProfile;
+    const readRange=Array.isArray(activeProfile.readTargetSeconds)
+      ?`${activeProfile.readTargetSeconds[0]}〜${activeProfile.readTargetSeconds[1]}秒`
+      :"数秒";
+    const replyRange=Array.isArray(activeProfile.replyAfterReadTargetSeconds)
+      ?`${activeProfile.replyAfterReadTargetSeconds[0]}〜${activeProfile.replyAfterReadTargetSeconds[1]}秒`
+      :"数秒〜数十秒";
+    lines.push(
+      "",
+      "会話ラリー・アクティブセッション: 有効",
+      `ラリー判定の目安: 直前返信から約${activeProfile.onlineWindowMinutes??"-"}分以内`,
+      `ラリー中の既読目安: ${readRange}`,
+      `既読後の返信目安: ${replyRange}`,
+      "画像は内容を見る時間を少し追加 / スタンプは軽めに反応"
     );
   }
 

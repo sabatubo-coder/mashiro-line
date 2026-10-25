@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-1-sticker-image-swap-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-2-active-conversation-session-v1";
 const ASSETS = [
   "./",
   "./index.html",
