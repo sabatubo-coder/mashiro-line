@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-12a-talk-transition-initial-scroll-stability-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-13-prep-sticker-set-expansion-v1";
 const ASSETS = [
   "./",
   "./index.html",

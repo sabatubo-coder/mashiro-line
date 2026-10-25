@@ -555,7 +555,52 @@ button { -webkit-tap-highlight-color: transparent; }
   aspect-ratio: 1 / 1;
   object-fit: contain;
 }
+.sticker-mini-preview {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  background: linear-gradient(180deg,#fffdf8,#f4f6f8);
+  border: 1px solid rgba(38,43,47,.07);
+}
+.sticker-mini-preview-emoji { font-size: 28px; line-height: 1; }
+.sticker-mini-preview-text {
+  max-width: 100%;
+  padding: 0 3px;
+  font-size: 9px;
+  line-height: 1.15;
+  font-weight: 800;
+  text-align: center;
+  color: #25282c;
+  overflow-wrap: anywhere;
+}
 .sticker-choice-label { display: block; margin-top: 2px; font-size: 9px; }
+.sticker-message-mini {
+  display: inline-grid;
+  min-width: 112px;
+  max-width: 170px;
+  min-height: 88px;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  padding: 13px 16px;
+  border-radius: 22px;
+  background: linear-gradient(180deg,#fffefb,#f4f6f8);
+  border: 2px solid rgba(255,255,255,.95);
+  box-shadow: var(--shadow);
+}
+.sticker-message-mini-emoji { font-size: 42px; line-height: 1; }
+.sticker-message-mini-text {
+  font-size: 17px;
+  line-height: 1.15;
+  font-weight: 900;
+  letter-spacing: .01em;
+  color: #26292d;
+  text-align: center;
+}
 
 .media-message {
   overflow: hidden;
@@ -1471,15 +1516,28 @@ const PROACTIVE_IMAGE_ASSETS = {
 function proactiveImageAsset(id){return PROACTIVE_IMAGE_ASSETS[String(id||"").trim()]||null;}
 
 const STICKERS = {
-  // smile / cheer IDs are retained so old Phase 3.2 messages remain readable.
-  smile:{id:"smile",label:"おはよ",emoji:"☀️",image:"./assets/stickers/smile.png"},
-  laugh:{id:"laugh",label:"わはは",emoji:"😆",image:"./assets/stickers/laugh.png"},
-  ok:{id:"ok",label:"OK",emoji:"👌",image:"./assets/stickers/ok.png"},
-  thanks:{id:"thanks",label:"ありがと",emoji:"🙌",image:"./assets/stickers/thanks.png"},
-  cheer:{id:"cheer",label:"おつかれ",emoji:"☕",image:"./assets/stickers/cheer.png"},
-  surprise:{id:"surprise",label:"びっくり",emoji:"😳",image:"./assets/stickers/surprise.png"},
-  sleepy:{id:"sleepy",label:"ねむい",emoji:"😴",image:"./assets/stickers/sleepy.png"},
-  wave:{id:"wave",label:"またね",emoji:"👋",image:"./assets/stickers/wave.png"}
+  // Existing illustrated stickers. IDs are retained so old messages remain readable.
+  smile:{id:"smile",label:"おはよ",emoji:"☀️",image:"./assets/stickers/smile.png",kind:"image"},
+  laugh:{id:"laugh",label:"わはは",emoji:"😆",image:"./assets/stickers/laugh.png",kind:"image"},
+  ok:{id:"ok",label:"OK",emoji:"👌",image:"./assets/stickers/ok.png",kind:"image"},
+  thanks:{id:"thanks",label:"ありがと",emoji:"🙌",image:"./assets/stickers/thanks.png",kind:"image"},
+  cheer:{id:"cheer",label:"おつかれ",emoji:"☕",image:"./assets/stickers/cheer.png",kind:"image"},
+  surprise:{id:"surprise",label:"びっくり",emoji:"😳",image:"./assets/stickers/surprise.png",kind:"image"},
+  sleepy:{id:"sleepy",label:"ねむい",emoji:"😴",image:"./assets/stickers/sleepy.png",kind:"image"},
+  wave:{id:"wave",label:"またね",emoji:"👋",image:"./assets/stickers/wave.png",kind:"image"},
+
+  // Phase 3.2.13 preparation: lightweight mini-stickers broaden everyday use cases.
+  // Avoid ambiguous or provocative emoji; 😅 is intentionally not used.
+  goodnight:{id:"goodnight",label:"おやすみ",emoji:"🌙",kind:"mini"},
+  sorry:{id:"sorry",label:"ごめん",emoji:"🙏",kind:"mini"},
+  happy:{id:"happy",label:"うれしい",emoji:"✨",kind:"mini"},
+  down:{id:"down",label:"しょんぼり",emoji:"☁️",kind:"mini"},
+  troubled:{id:"troubled",label:"困った",emoji:"💭",kind:"mini"},
+  clap:{id:"clap",label:"拍手",emoji:"👏",kind:"mini"},
+  hungry:{id:"hungry",label:"おなかすいた",emoji:"🍙",kind:"mini"},
+  itadakimasu:{id:"itadakimasu",label:"いただきます",emoji:"🍚",kind:"mini"},
+  areyouok:{id:"areyouok",label:"大丈夫？",emoji:"☕",kind:"mini"},
+  ganbare:{id:"ganbare",label:"がんばれ",emoji:"📣",kind:"mini"}
 };
 
 
@@ -1766,9 +1824,16 @@ function renderStickerPanel(){
   stickerPanel.replaceChildren();
   for(const sticker of Object.values(STICKERS)){
     const button=document.createElement("button");button.type="button";button.className="sticker-choice";button.dataset.stickerId=sticker.id;
-    const image=document.createElement("img");image.className="sticker-choice-image";image.src=sticker.image;image.alt=sticker.label;image.loading="lazy";
+    if(sticker.kind==="mini"||!sticker.image){
+      const preview=document.createElement("div");preview.className="sticker-mini-preview";
+      const emoji=document.createElement("span");emoji.className="sticker-mini-preview-emoji";emoji.textContent=sticker.emoji||"✨";
+      const text=document.createElement("span");text.className="sticker-mini-preview-text";text.textContent=sticker.label;
+      preview.append(emoji,text);button.appendChild(preview);
+    }else{
+      const image=document.createElement("img");image.className="sticker-choice-image";image.src=sticker.image;image.alt=sticker.label;image.loading="lazy";button.appendChild(image);
+    }
     const label=document.createElement("span");label.className="sticker-choice-label";label.textContent=sticker.label;
-    button.append(image,label);button.addEventListener("click",()=>sendStickerMessage(sticker.id));stickerPanel.appendChild(button);
+    button.appendChild(label);button.addEventListener("click",()=>sendStickerMessage(sticker.id));stickerPanel.appendChild(button);
   }
 }
 
@@ -2776,10 +2841,18 @@ function renderMessages(options={}){
       }
     }else if(type==="sticker"){
       const sticker=STICKERS[messageStickerId(message)]||STICKERS.smile;
-      contentNode=document.createElement("div");contentNode.className="sticker-message";
-      const image=document.createElement("img");image.className="sticker-message-image";image.src=sticker.image;image.alt=sticker.label;image.loading="lazy";
-      const label=document.createElement("div");label.className="sticker-message-label";label.textContent=sticker.label;
-      contentNode.append(image,label);
+      contentNode=document.createElement("div");
+      if(sticker.kind==="mini"||!sticker.image){
+        contentNode.className="sticker-message-mini";
+        const emoji=document.createElement("div");emoji.className="sticker-message-mini-emoji";emoji.textContent=sticker.emoji||"✨";
+        const label=document.createElement("div");label.className="sticker-message-mini-text";label.textContent=sticker.label;
+        contentNode.append(emoji,label);
+      }else{
+        contentNode.className="sticker-message";
+        const image=document.createElement("img");image.className="sticker-message-image";image.src=sticker.image;image.alt=sticker.label;image.loading="lazy";
+        const label=document.createElement("div");label.className="sticker-message-label";label.textContent=sticker.label;
+        contentNode.append(image,label);
+      }
     }else{
       contentNode=document.createElement("div");contentNode.className="bubble";contentNode.textContent=message.text;
     }
