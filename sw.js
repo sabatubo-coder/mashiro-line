@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-15-proactive-daily-continuity-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-15a-quote-precision-dm-duplicate-guard-v1";
 const ASSETS = [
   "./",
   "./index.html",
