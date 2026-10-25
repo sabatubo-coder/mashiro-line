@@ -139,6 +139,7 @@ button { -webkit-tap-highlight-color: transparent; }
   text-align: left;
   padding: 12px 15px;
   cursor: pointer;
+  touch-action: pan-y;
 }
 
 .talk-item:active { background: #f2f3f5; }
@@ -344,8 +345,13 @@ button { -webkit-tap-highlight-color: transparent; }
   overscroll-behavior-y: contain;
   overflow-anchor: none;
   padding: 14px 12px 18px;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   touch-action: pan-y;
+}
+
+/* Phase 3.2.12a: 初期位置合わせ中の先頭フラッシュを見せない。 */
+.chat-screen.initializing .message-list {
+  visibility: hidden;
 }
 
 .day-divider {
@@ -557,6 +563,16 @@ button { -webkit-tap-highlight-color: transparent; }
   background: white;
   box-shadow: var(--shadow);
   max-width: 260px;
+}
+.media-image-holder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 120px;
+  color: #777b82;
+  font-size: 12px;
+  background: #e7e9ec;
+  overflow: hidden;
 }
 .media-message img {
   display: block;
@@ -1441,16 +1457,16 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.12-image-conversation-context-memory-v1";
+const PUSH_VERSION = "phase3.2.12a-talk-transition-initial-scroll-stability-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
 
 const PROACTIVE_IMAGE_ASSETS = {
-  food_cocoa_bread:{id:"food_cocoa_bread",src:"./assets/proactive/food-cocoa-bread.jpg",alt:"食べ物と飲み物の写真"},
-  desk_game:{id:"desk_game",src:"./assets/proactive/desk-game.jpg",alt:"机の上の身近な物の写真"},
-  sunset_after_rain:{id:"sunset_after_rain",src:"./assets/proactive/sunset-after-rain.jpg",alt:"雨上がりの夕焼けの写真"},
-  desk_snack_study:{id:"desk_snack_study",src:"./assets/proactive/desk-snack-study.jpg",alt:"机の上のノートや飲み物の写真"}
+  food_cocoa_bread:{id:"food_cocoa_bread",src:"./assets/proactive/food-cocoa-bread.jpg",alt:"食べ物と飲み物の写真",width:1200,height:900},
+  desk_game:{id:"desk_game",src:"./assets/proactive/desk-game.jpg",alt:"机の上の身近な物の写真",width:1200,height:900},
+  sunset_after_rain:{id:"sunset_after_rain",src:"./assets/proactive/sunset-after-rain.jpg",alt:"雨上がりの夕焼けの写真",width:1200,height:900},
+  desk_snack_study:{id:"desk_snack_study",src:"./assets/proactive/desk-snack-study.jpg",alt:"机の上のノートや飲み物の写真",width:1200,height:900}
 };
 function proactiveImageAsset(id){return PROACTIVE_IMAGE_ASSETS[String(id||"").trim()]||null;}
 
@@ -1543,6 +1559,7 @@ const appState = {
   messageScrollUserGeneration: 0,
   messageScrollRestoreToken: 0,
   messageScrollProgrammaticUntil: 0,
+  chatOpenRenderToken: 0,
   pushSeenSyncBusy: false,
   pushSeenSyncTimer: null
 };
@@ -2157,11 +2174,59 @@ function renderTalkList(){
     main.append(top,preview);
     const side=document.createElement("div");side.className="talk-side";const time=document.createElement("div");time.className="talk-time";time.textContent=last?formatListTime(last.createdAt):"";side.appendChild(time);
     if(unread>0){const badge=document.createElement("div");badge.className="unread-badge";badge.textContent=unread>99?"99+":String(unread);side.appendChild(badge);}
-    item.append(avatar,main,side);item.addEventListener("click",()=>openConversation(conversation.id));talkList.appendChild(item);
+    item.append(avatar,main,side);talkList.appendChild(item);
   }
 
   updateAppBadgeFromLocal();
 }
+
+// Phase 3.2.12a: iOS PWAで一覧項目の最初のタップが取りこぼされないよう、
+// 再描画される各buttonではなくtalkList本体に安定したイベント委譲を置く。
+const TALK_TAP_MOVE_THRESHOLD_PX=12;
+let talkPointerState=null;
+let lastTalkPointerActivationAt=0;
+
+function talkItemFromEventTarget(target){
+  if(!(target instanceof Element))return null;
+  const item=target.closest('.talk-item[data-conversation-id]');
+  return item&&talkList.contains(item)?item:null;
+}
+function activateTalkItem(item){
+  const conversationId=String(item?.dataset?.conversationId||'');
+  if(conversationId&&conversationById(conversationId))openConversation(conversationId);
+}
+
+talkList.addEventListener('pointerdown',event=>{
+  const item=talkItemFromEventTarget(event.target);
+  if(!item||event.pointerType==='mouse')return;
+  talkPointerState={
+    pointerId:event.pointerId,
+    item,
+    x:event.clientX,
+    y:event.clientY
+  };
+},{passive:true});
+
+talkList.addEventListener('pointercancel',()=>{talkPointerState=null;},{passive:true});
+talkList.addEventListener('pointerup',event=>{
+  const state=talkPointerState;talkPointerState=null;
+  if(!state||state.pointerId!==event.pointerId)return;
+  const dx=event.clientX-state.x,dy=event.clientY-state.y;
+  if(Math.hypot(dx,dy)>TALK_TAP_MOVE_THRESHOLD_PX)return;
+  const item=talkItemFromEventTarget(event.target);
+  if(!item||item!==state.item)return;
+  event.preventDefault();
+  lastTalkPointerActivationAt=Date.now();
+  activateTalkItem(item);
+},{passive:false});
+
+talkList.addEventListener('click',event=>{
+  const item=talkItemFromEventTarget(event.target);
+  if(!item)return;
+  // pointerupで処理済みの合成clickは二重遷移させない。
+  if(Date.now()-lastTalkPointerActivationAt<700){event.preventDefault();return;}
+  activateTalkItem(item);
+});
 
 function isConversationActuallyVisible(conversationId){
   return Boolean(
@@ -2399,6 +2464,9 @@ function startPresenceScheduler(){
 
 function openConversation(conversationId,pushHistory=true){
   const conversation=conversationById(conversationId);if(!conversation)return;
+  const openToken=++appState.chatOpenRenderToken;
+  appState.messageScrollRestoreToken+=1;
+  chatScreen.classList.add("initializing");
   appState.activeConversationId=conversationId;
   if(conversation.type==="dm"){
     const c=characterById(conversation.characterId);chatTitle.textContent=getCharacterDisplayName(c.id);setPresenceStatusText(presenceSupportedConversation(conversation)?"":"オンライン");typingLabel.textContent=`${getCharacterDisplayName(c.id)}が入力中…`;applyCharacterAvatar(headerAvatar,c.id);applyCharacterAvatar(typingAvatar,c.id);
@@ -2407,12 +2475,36 @@ function openConversation(conversationId,pushHistory=true){
   }
   listScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;chatScreen.hidden=false;
   markIncomingSeen(conversationId);
-  renderMessages({scrollMode:"bottom"});autosizeInput();
+  renderMessages({scrollMode:"bottom",settle:false});autosizeInput();
+  revealOpenedConversationAtBottom(conversationId,openToken);
   if(presenceSupportedConversation(conversation))schedulePresenceRefresh(80);
   if(pushHistory)history.pushState({conversationId},"",`#chat=${conversationId}`);
 }
-function showTalkList(pushHistory=true){appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";clearPendingImage();closeStickerPanel();autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
+function showTalkList(pushHistory=true){appState.chatOpenRenderToken+=1;chatScreen.classList.remove("initializing");appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";clearPendingImage();closeStickerPanel();autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
 
+
+function revealOpenedConversationAtBottom(conversationId,openToken){
+  const place=()=>{
+    if(openToken!==appState.chatOpenRenderToken)return false;
+    if(appState.activeConversationId!==conversationId||chatScreen.hidden)return false;
+    setMessageScrollTop(messageList.scrollHeight);
+    return true;
+  };
+  // DOM描画直後と次フレームの両方で即時配置し、先頭位置を画面に出さない。
+  place();
+  requestAnimationFrame(()=>{
+    if(!place())return;
+    requestAnimationFrame(()=>{
+      if(!place())return;
+      chatScreen.classList.remove("initializing");
+    });
+  });
+  // rAFが抑制された場合の保険。
+  setTimeout(()=>{
+    if(!place())return;
+    chatScreen.classList.remove("initializing");
+  },120);
+}
 
 function groupAiParticipantIds(group){
   return (Array.isArray(group?.participants)?group.participants:[])
@@ -2673,7 +2765,12 @@ function renderMessages(options={}){
     let contentNode;
     if(type==="image"){
       contentNode=document.createElement("div");contentNode.className="media-message";
-      const imageHolder=document.createElement("div");imageHolder.className="media-image-holder";imageHolder.textContent="写真を読み込み中…";contentNode.appendChild(imageHolder);hydrateMessageImage(imageHolder,message);
+      const imageHolder=document.createElement("div");imageHolder.className="media-image-holder";
+      const builtInAsset=proactiveImageAsset(message.imageAssetId);
+      const mediaWidth=Number(message.mediaWidth||builtInAsset?.width||0);
+      const mediaHeight=Number(message.mediaHeight||builtInAsset?.height||0);
+      if(mediaWidth>0&&mediaHeight>0){imageHolder.style.aspectRatio=`${mediaWidth} / ${mediaHeight}`;}
+      imageHolder.textContent="写真を読み込み中…";contentNode.appendChild(imageHolder);hydrateMessageImage(imageHolder,message);
       if(String(message.text||"").trim()){
         const caption=document.createElement("div");caption.className="media-caption";caption.textContent=message.text;contentNode.appendChild(caption);
       }
@@ -2703,7 +2800,7 @@ function renderMessages(options={}){
     }
     const clock=document.createElement("span");clock.textContent=formatClock(message.createdAt);meta.appendChild(clock);stack.append(contentNode,meta);row.appendChild(stack);messageList.appendChild(row);
   }
-  restoreMessageScrollState(scrollState,{forceBottom:scrollMode==="bottom",settle:true});
+  restoreMessageScrollState(scrollState,{forceBottom:scrollMode==="bottom",settle:options?.settle!==false});
 }
 function scrollToBottom(behavior="smooth"){
   const state={
