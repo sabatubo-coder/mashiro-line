@@ -1553,7 +1553,10 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.14-message-reaction-quote-reply-v1";
+const PUSH_VERSION = "phase3.2.15-proactive-daily-continuity-v1";
+const PROACTIVE_CONTINUITY_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
+const PROACTIVE_CONTINUITY_MAX_STAGES = 3;
+const PROACTIVE_CONTINUITY_START_CHANCE = Object.freeze({natsuki:0.20,shiki:0.16,ichi:0.20,bunji:0.11,sosuke:0.07});
 const MESSAGE_REACTION_EMOJIS = Object.freeze(["👍","😂","😊","😮","🙏","👏"]);
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
@@ -4087,7 +4090,8 @@ function buildPushSnapshot(){
     dm[id]={
       conversationId:c.conversationId,
       messages:recentHistoryForAPI(c.conversationId),
-      memories:memoriesForAPI(id)
+      memories:memoriesForAPI(id),
+      state:loadDmProactiveState(id)
     };
   }
 
@@ -5135,6 +5139,31 @@ function randomBetween(min,max){return min+Math.random()*(max-min);}
 function isQuietTime(date=new Date()){const h=date.getHours()+date.getMinutes()/60;return h>=22.5||h<7;}
 function nextMorningTimestamp(){const t=new Date();t.setDate(t.getDate()+(t.getHours()>=22?1:0));t.setHours(7,15+Math.floor(Math.random()*45),0,0);return t.getTime();}
 
+function normalizeDmContinuityEvent(raw,now=Date.now()){
+  if(!raw||typeof raw!=="object")return null;
+  const key=String(raw.key||"").trim().slice(0,120),summary=String(raw.summary||"").trim().slice(0,300);
+  const startedAt=Number(raw.startedAt||0),lastStageAt=Number(raw.lastStageAt||startedAt||0),nextDueAt=Number(raw.nextDueAt||0),expiresAt=Number(raw.expiresAt||0);
+  const stageCount=Math.max(1,Math.min(PROACTIVE_CONTINUITY_MAX_STAGES,Number(raw.stageCount||1)));
+  if(!key||!summary||!startedAt||!nextDueAt||!expiresAt||expiresAt<=now||stageCount>=PROACTIVE_CONTINUITY_MAX_STAGES)return null;
+  return{key,summary,startedAt,lastStageAt,nextDueAt,expiresAt,stageCount};
+}
+function dmContinuityDue(state,now=Date.now()){const e=normalizeDmContinuityEvent(state?.activeContinuityEvent,now);return Boolean(e&&e.nextDueAt<=now);}
+function dmContinuityStartAllowed(characterId,state){
+  if(!PROACTIVE_CONTINUITY_CHARACTERS.has(characterId)||normalizeDmContinuityEvent(state?.activeContinuityEvent))return false;
+  const c=characterById(characterId);if(!c||Number(state?.dailyCount||0)>=Number(c.proactive.dailyMax||0))return false;
+  return Math.random()<Number(PROACTIVE_CONTINUITY_START_CHANCE[characterId]||0);
+}
+function dmContinuityDelayMs(value,fallback=45){const allowed=new Set([15,20,30,45,60,90,120,180]);const m=allowed.has(Number(value))?Number(value):fallback;return m*60*1000;}
+function dmContinuityExpiryMs(value,fallback=240){const allowed=new Set([60,120,180,240,360]);const m=allowed.has(Number(value))?Number(value):fallback;return Math.min(6*60*60*1000,m*60*1000);}
+function applyDmContinuityResult(state,result,characterId,now=Date.now()){
+  if(!PROACTIVE_CONTINUITY_CHARACTERS.has(characterId))return{action:"none",active:null};
+  const action=String(result?.continuityAction||"none"),current=normalizeDmContinuityEvent(state.activeContinuityEvent,now);
+  const key=String(result?.continuityKey||"").trim().slice(0,120),summary=String(result?.continuitySummary||"").trim().slice(0,300);
+  if(action==="start"&&!current&&key&&summary){const e={key,summary,startedAt:now,lastStageAt:now,stageCount:1,nextDueAt:now+dmContinuityDelayMs(result?.continuityNextDelayMinutes,45),expiresAt:now+dmContinuityExpiryMs(result?.continuityExpiresInMinutes,240)};state.activeContinuityEvent=e;state.nextDueAt=e.nextDueAt;return{action:"start",active:e};}
+  if(current&&["continue","complete"].includes(action)&&(!key||key===current.key)){const n=current.stageCount+1;if(action==="complete"||n>=PROACTIVE_CONTINUITY_MAX_STAGES){state.activeContinuityEvent=null;return{action:"complete",active:null};}const e={...current,summary:summary||current.summary,stageCount:n,lastStageAt:now,nextDueAt:now+dmContinuityDelayMs(result?.continuityNextDelayMinutes,60)};state.activeContinuityEvent=e;state.nextDueAt=e.nextDueAt;return{action:"continue",active:e};}
+  if(!current)state.activeContinuityEvent=null;return{action:"none",active:current};
+}
+
 function loadDmProactiveState(characterId){
   const c=characterById(characterId),now=Date.now();
 
@@ -5167,7 +5196,8 @@ function loadDmProactiveState(characterId){
         recentProactiveHistory:
           Array.isArray(p.recentProactiveHistory)
             ?p.recentProactiveHistory.slice(-12)
-            :[]
+            :[],
+        activeContinuityEvent:normalizeDmContinuityEvent(p.activeContinuityEvent,now)
       };
     }
   }catch{}
@@ -5181,7 +5211,8 @@ function loadDmProactiveState(characterId){
     lastSentAt:0,
     dailyDate:dateKey(),
     dailyCount:0,
-    recentProactiveHistory:[]
+    recentProactiveHistory:[],
+    activeContinuityEvent:null
   };
 }
 function saveDmProactiveState(id,state){localStorage.setItem(proactiveKey(id),JSON.stringify(state));schedulePushSync();}
@@ -5232,6 +5263,9 @@ async function callDmProactive(
             )?.createdAt||null,
           recentProactiveHistory:
             state.recentProactiveHistory||[],
+          activeContinuityEvent:normalizeDmContinuityEvent(state.activeContinuityEvent),
+          continuityEventDue:dmContinuityDue(state),
+          continuityStartAllowed:dmContinuityStartAllowed(characterId,state),
           clientVersion:PUSH_VERSION
         }
       })
@@ -5265,7 +5299,8 @@ async function maybeSendDmProactive(characterId){
     return;
   }
 
-  if(state.dailyCount>=c.proactive.dailyMax){
+  const continuationDue=dmContinuityDue(state);
+  if(!continuationDue&&state.dailyCount>=c.proactive.dailyMax){
     state.nextDueAt=nextMorningTimestamp();
     saveDmProactiveState(characterId,state);
     return;
@@ -5286,6 +5321,7 @@ async function maybeSendDmProactive(characterId){
   }
 
   if(
+    !continuationDue&&
     latestAny?.senderId===characterId &&
     latestChar &&
     now-Date.parse(latestChar.createdAt)<
@@ -5346,7 +5382,8 @@ async function maybeSendDmProactive(characterId){
       }
 
       state.lastSentAt=Date.now();
-      state.dailyCount+=1;
+      const continuityTransition=applyDmContinuityResult(state,result,characterId,state.lastSentAt);
+      if(!["continue","complete"].includes(continuityTransition.action))state.dailyCount+=1;
       state.recentProactiveHistory=[
         ...(state.recentProactiveHistory||[]),
         {
@@ -5363,7 +5400,7 @@ async function maybeSendDmProactive(characterId){
       ].slice(-12);
 
       saveDmProactiveState(characterId,state);
-      scheduleDmProactive(characterId);
+      if(!continuityTransition.active)scheduleDmProactive(characterId);
     }else{
       scheduleDmProactive(characterId,"retry");
     }
