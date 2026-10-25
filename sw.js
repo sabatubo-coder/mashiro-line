@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-2-active-conversation-session-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-3-one-message-one-push-v1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -40,15 +40,26 @@ self.addEventListener("push", (event) => {
   }
 
   const title = String(data.title || "ましろLINE");
+  const eventIds = Array.isArray(data.eventIds) ? data.eventIds : [];
+  const primaryEventId = String(eventIds[0] || "");
+  const conversationId = String(data.conversationId || "");
+  const notificationTag = primaryEventId
+    ? `mashiroline-${conversationId || "message"}-${primaryEventId}`
+    : conversationId
+      ? `mashiroline-${conversationId}-${Date.now()}`
+      : `mashiroline-${Date.now()}`;
+
   const options = {
     body: String(data.body || "新しいメッセージがあります"),
     icon: "./icon-192.png",
     badge: "./icon-192.png",
-    tag: data.conversationId ? `mashiroline-${data.conversationId}` : "mashiroline",
+    // Phase 3.2.3 final:
+    // one message = one notification. Never reuse the conversation-only tag.
+    tag: notificationTag,
     renotify: true,
     data: {
-      conversationId: String(data.conversationId || ""),
-      eventIds: Array.isArray(data.eventIds) ? data.eventIds : []
+      conversationId,
+      eventIds
     }
   };
 

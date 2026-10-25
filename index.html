@@ -1416,7 +1416,7 @@ const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
-const PUSH_VERSION = "phase3.2.2-active-conversation-session-v1";
+const PUSH_VERSION = "phase3.2.3-group-rally-momentum-one-message-one-push-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -2903,7 +2903,7 @@ async function processDelayedGroupState(){
 
 function enqueueDelayedGroupResult(conversation,userMessage,result){
   const groupTiming=result?.groupTiming;
-  const replies=Array.isArray(result?.replies)?result.replies.slice(0,3):[];
+  const replies=Array.isArray(result?.replies)?result.replies.slice(0,15):[];
 
   if(
     !groupTiming?.enabled ||
@@ -3011,6 +3011,7 @@ function endpointFor(apiEndpoint,kind){
   if(kind==="groupChat")return `${base}/api/group/chat`;
   if(kind==="groupProactive")return `${base}/api/group/proactive`;
   if(kind==="groupAutonomousCancel")return `${base}/api/group/autonomous/cancel`;
+  if(kind==="groupRallyCancel")return `${base}/api/group/rally/cancel`;
   if(kind==="pushPublicKey")return `${base}/api/push/public-key`;
   if(kind==="pushRegister")return `${base}/api/push/register`;
   if(kind==="pushSync")return `${base}/api/push/sync`;
@@ -3140,6 +3141,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
       }
     }else{
       await cancelPendingGroupAutonomous(conversation.groupId);
+      await cancelPendingGroupRally(conversation.groupId);
       const result=await callGroupChat(conversation,accessCode,apiEndpoint);
       if(result?.mediaSummary)updateMessageMediaSummary(conversation.id,userMessage.id,result.mediaSummary);
 
@@ -3147,7 +3149,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
         // 既読・返信は各キャラの生活モデル時刻に従う。
       }else{
         await sleep(350);markOutgoingRead(conversation.id);setTyping(true);
-        const replies=Array.isArray(result.replies)?result.replies.slice(0,3):[];setTyping(false);
+        const replies=Array.isArray(result.replies)?result.replies.slice(0,15):[];setTyping(false);
         for(const reply of replies){
           if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
           setTyping(true,reply.speakerId);await sleep(550+Math.min(850,String(reply.message).length*12));setTyping(false);
@@ -3611,6 +3613,19 @@ function pushDiagnosticsText(data){
     `最後のPush送達: ${formatDiagnosticTime(n.lastPushDeliveryAtIso)}`,
     `Push再送待ち: ${n.pendingPushRetryCount??0}件`
   ];
+
+  if(data.groupRallyProfile?.enabled){
+    const r=data.groupRallyProfile;
+    lines.push(
+      "",
+      "グループ会話ラリー・盛り上がり継続: 有効",
+      `1話題の最大メッセージ数: ${r.maxMessages??15}通`,
+      "盛り上がり目安: 低2〜4 / 普通4〜7 / 高7〜11 / 非常に高11〜15通",
+      `途中参加: ${r.interruptible?"ましろ発言で旧予約をキャンセルし再構成":"無効"}`,
+      `通知方針: ${r.notificationPolicy||"1メッセージ=1 Push"}`,
+      `自然終了: ${r.stallGuard||"相づちだけなら終了"}`
+    );
+  }
 
   if(n.replyTimingModel?.enabled){
     lines.push(
@@ -4112,6 +4127,33 @@ async function cancelPendingGroupAutonomous(groupId){
   try{
     const result=await fetchJsonWithRetry(
       endpointFor(apiEndpoint,"groupAutonomousCancel"),
+      {
+        method:"POST",
+        headers:pushAuthHeaders(accessCode),
+        body:JSON.stringify({
+          deviceId:getPushDeviceId(),
+          groupId
+        })
+      },
+      0
+    );
+    return Number(result?.cancelled||0);
+  }catch{
+    return 0;
+  }
+}
+
+
+async function cancelPendingGroupRally(groupId){
+  const group=groupById(groupId);
+  if(group?.conversationId)removeDelayedGroupForConversation(group.conversationId);
+  if(!pushNotificationsEnabled())return 0;
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
+  if(!apiEndpoint||!accessCode)return 0;
+
+  try{
+    const result=await fetchJsonWithRetry(
+      endpointFor(apiEndpoint,"groupRallyCancel"),
       {
         method:"POST",
         headers:pushAuthHeaders(accessCode),
