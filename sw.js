@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-5-fixed-composer-schedule-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-6-scroll-unread-badge-v1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -64,9 +64,14 @@ self.addEventListener("push", (event) => {
   };
 
   const promises = [self.registration.showNotification(title, options)];
-  const badgeCount = Number(data.badgeCount || 0);
-  if (self.navigator && "setAppBadge" in self.navigator && badgeCount > 0) {
-    promises.push(self.navigator.setAppBadge(badgeCount));
+  const badgeCount = Math.max(0, Number(data.badgeCount || 0));
+  const workerNavigator = typeof navigator !== "undefined" ? navigator : self.navigator;
+  if (workerNavigator) {
+    if (badgeCount > 0 && "setAppBadge" in workerNavigator) {
+      promises.push(Promise.resolve(workerNavigator.setAppBadge(badgeCount)).catch(() => {}));
+    } else if (badgeCount === 0 && "clearAppBadge" in workerNavigator) {
+      promises.push(Promise.resolve(workerNavigator.clearAppBadge()).catch(() => {}));
+    }
   }
 
   event.waitUntil(Promise.all(promises));

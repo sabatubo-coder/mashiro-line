@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 3.2.5</title>
+  <title>ましろLINE（仮） Phase 3.2.6</title>
   <style>
 :root {
   color-scheme: light;
@@ -342,6 +342,7 @@ button { -webkit-tap-highlight-color: transparent; }
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
+  overflow-anchor: none;
   padding: 14px 12px 18px;
   scroll-behavior: smooth;
   touch-action: pan-y;
@@ -1439,7 +1440,8 @@ const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
-const PUSH_VERSION = "phase3.2.5-fixed-composer-schedule-consistency-v1";
+const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
+const PUSH_VERSION = "phase3.2.6-scroll-stability-unread-badge-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -1529,7 +1531,12 @@ const appState = {
   groupAutonomousTestBusy: false,
   pendingImage: null,
   pendingImagePreviewUrl: "",
-  stickerPanelOpen: false
+  stickerPanelOpen: false,
+  messageScrollUserGeneration: 0,
+  messageScrollRestoreToken: 0,
+  messageScrollProgrammaticUntil: 0,
+  pushSeenSyncBusy: false,
+  pushSeenSyncTimer: null
 };
 
 
@@ -1556,7 +1563,6 @@ window.addEventListener("orientationchange",()=>{
 });
 if(window.visualViewport){
   window.visualViewport.addEventListener("resize",scheduleAppViewportSync,{passive:true});
-  window.visualViewport.addEventListener("scroll",scheduleAppViewportSync,{passive:true});
 }
 
 const listScreen = document.getElementById("listScreen");
@@ -1744,7 +1750,7 @@ function renderStickerPanel(){
 async function hydrateMessageImage(container,message){
   try{
     const record=await getMediaRecord(message.mediaId);if(!record?.blob)throw new Error("missing");
-    const img=document.createElement("img");const url=URL.createObjectURL(record.blob);img.src=url;img.alt="送信された写真";img.onload=()=>setTimeout(()=>URL.revokeObjectURL(url),1500);container.replaceChildren(img);
+    const img=document.createElement("img");const url=URL.createObjectURL(record.blob);img.src=url;img.alt="送信された写真";img.onload=()=>{setTimeout(()=>URL.revokeObjectURL(url),1500);scheduleMessageScrollSettle();};container.replaceChildren(img);
   }catch{container.classList.add("media-image-missing");container.textContent="写真";}
 }
 
@@ -2009,6 +2015,10 @@ function markIncomingSeen(conversationId,{force=false}={}){
     }
   }
   if(changed)saveConversationMessages(conversationId,msgs);
+  const seenPushEventIds=msgs
+    .filter(m=>m.senderId!=="mashiro"&&m.seenByUser&&m.pushEventId)
+    .map(m=>String(m.pushEventId));
+  if(seenPushEventIds.length)queueSeenPushEvents(seenPushEventIds);
   updateAppBadgeFromLocal();
   return changed;
 }
@@ -2156,7 +2166,7 @@ function openConversation(conversationId,pushHistory=true){
   }
   listScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;chatScreen.hidden=false;
   markIncomingSeen(conversationId);
-  renderMessages();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);
+  renderMessages({scrollMode:"bottom"});autosizeInput();
   if(presenceSupportedConversation(conversation))schedulePresenceRefresh(80);
   if(pushHistory)history.pushState({conversationId},"",`#chat=${conversationId}`);
 }
@@ -2318,13 +2328,103 @@ function migrateLegacyGroupReadState(conversationId){
   return changed;
 }
 
-function renderMessages(){
+
+const MESSAGE_BOTTOM_THRESHOLD_PX=56;
+function messageDistanceFromBottom(){
+  return Math.max(0,messageList.scrollHeight-messageList.clientHeight-messageList.scrollTop);
+}
+function messageListNearBottom(threshold=MESSAGE_BOTTOM_THRESHOLD_PX){
+  return messageDistanceFromBottom()<=threshold;
+}
+function captureMessageScrollState(){
+  const listRect=messageList.getBoundingClientRect();
+  let anchorId="",anchorOffset=0;
+  const rows=messageList.querySelectorAll('.message-row[data-message-id]');
+  for(const row of rows){
+    const rect=row.getBoundingClientRect();
+    if(rect.bottom>listRect.top+2){
+      anchorId=row.dataset.messageId||"";
+      anchorOffset=rect.top-listRect.top;
+      break;
+    }
+  }
+  return {
+    conversationId:appState.activeConversationId,
+    pinned:messageListNearBottom(),
+    scrollTop:messageList.scrollTop,
+    scrollHeight:messageList.scrollHeight,
+    anchorId,
+    anchorOffset,
+    userGeneration:appState.messageScrollUserGeneration
+  };
+}
+function setMessageScrollTop(top){
+  appState.messageScrollProgrammaticUntil=Date.now()+180;
+  messageList.scrollTop=Math.max(0,Number(top)||0);
+}
+function restoreMessageScrollState(state,{forceBottom=false,settle=true}={}){
+  if(!state)return;
+  const token=++appState.messageScrollRestoreToken;
+  const generation=state.userGeneration;
+  const apply=()=>{
+    if(token!==appState.messageScrollRestoreToken)return;
+    if(generation!==appState.messageScrollUserGeneration)return;
+    if(state.conversationId&&state.conversationId!==appState.activeConversationId)return;
+    if(forceBottom||state.pinned){
+      setMessageScrollTop(messageList.scrollHeight);
+      return;
+    }
+    if(state.anchorId){
+      const safeId=(window.CSS&&CSS.escape)?CSS.escape(state.anchorId):state.anchorId.replace(/["\\]/g,'\\$&');
+      const anchor=messageList.querySelector(`.message-row[data-message-id="${safeId}"]`);
+      if(anchor){
+        const listRect=messageList.getBoundingClientRect();
+        const currentOffset=anchor.getBoundingClientRect().top-listRect.top;
+        setMessageScrollTop(messageList.scrollTop+(currentOffset-state.anchorOffset));
+        return;
+      }
+    }
+    setMessageScrollTop(state.scrollTop);
+  };
+  apply();
+  requestAnimationFrame(()=>requestAnimationFrame(apply));
+  if(settle&&(forceBottom||state.pinned)){
+    [80,260,900].forEach(delay=>setTimeout(apply,delay));
+  }
+}
+function scheduleMessageScrollSettle(){
+  if(!appState.activeConversationId||chatScreen.hidden||!messageListNearBottom(80))return;
+  const state={
+    conversationId:appState.activeConversationId,
+    pinned:true,
+    scrollTop:messageList.scrollTop,
+    scrollHeight:messageList.scrollHeight,
+    anchorId:"",
+    anchorOffset:0,
+    userGeneration:appState.messageScrollUserGeneration
+  };
+  restoreMessageScrollState(state,{forceBottom:true,settle:true});
+}
+['touchstart','pointerdown','wheel'].forEach(type=>{
+  messageList.addEventListener(type,()=>{
+    appState.messageScrollUserGeneration+=1;
+    appState.messageScrollProgrammaticUntil=0;
+    appState.messageScrollRestoreToken+=1;
+  },{passive:true});
+});
+messageList.addEventListener('scroll',()=>{
+  if(Date.now()<appState.messageScrollProgrammaticUntil)return;
+}, {passive:true});
+
+function renderMessages(options={}){
   const conversation=activeConversation();if(!conversation)return;
+  const scrollMode=String(options?.scrollMode||"preserve");
+  const scrollState=captureMessageScrollState();
   if(conversation.type==="group")migrateLegacyGroupReadState(conversation.id);
   const messages=loadConversationMessages(conversation.id);messageList.replaceChildren();let previousDay="";
   for(const message of messages){
     const currentDay=dayLabel(message.createdAt);if(currentDay!==previousDay){const divider=document.createElement("div");divider.className="day-divider";const span=document.createElement("span");span.textContent=currentDay;divider.appendChild(span);messageList.appendChild(divider);previousDay=currentDay;}
-    const outgoing=message.senderId==="mashiro";const row=document.createElement("div");row.className=`message-row ${outgoing?"outgoing":"incoming"}`;
+    const outgoing=message.senderId==="mashiro";const row=document.createElement("div");row.className=`message-row ${outgoing?"outgoing":"incoming"}`;row.dataset.messageId=String(message.id||"");
     if(!outgoing){const mini=document.createElement("div");applyCharacterAvatar(mini,message.senderId);mini.classList.add("mini-avatar");row.appendChild(mini);}
     const stack=document.createElement("div");stack.className="message-stack";
     if(conversation.type==="group"&&!outgoing){const sender=document.createElement("div");sender.className="sender-name";sender.textContent=senderDisplayName(message.senderId);stack.appendChild(sender);}
@@ -2362,8 +2462,26 @@ function renderMessages(){
     }
     const clock=document.createElement("span");clock.textContent=formatClock(message.createdAt);meta.appendChild(clock);stack.append(contentNode,meta);row.appendChild(stack);messageList.appendChild(row);
   }
+  restoreMessageScrollState(scrollState,{forceBottom:scrollMode==="bottom",settle:true});
 }
-function scrollToBottom(behavior="smooth"){requestAnimationFrame(()=>messageList.scrollTo({top:messageList.scrollHeight,behavior}));}
+function scrollToBottom(behavior="smooth"){
+  const state={
+    conversationId:appState.activeConversationId,
+    pinned:true,
+    scrollTop:messageList.scrollTop,
+    scrollHeight:messageList.scrollHeight,
+    anchorId:"",
+    anchorOffset:0,
+    userGeneration:appState.messageScrollUserGeneration
+  };
+  if(behavior==="smooth"){
+    appState.messageScrollProgrammaticUntil=Date.now()+1100;
+    requestAnimationFrame(()=>messageList.scrollTo({top:messageList.scrollHeight,behavior:"smooth"}));
+    setTimeout(()=>restoreMessageScrollState(state,{forceBottom:true,settle:false}),900);
+  }else{
+    restoreMessageScrollState(state,{forceBottom:true,settle:true});
+  }
+}
 function showToast(text,duration=3200){clearTimeout(appState.toastTimer);toast.textContent=text;toast.classList.add("visible");appState.toastTimer=setTimeout(()=>toast.classList.remove("visible"),duration);}
 
 function createSettingsRow({type,id,name,subtitle}){
@@ -2492,6 +2610,7 @@ function resetProfileAll(){
 
 function setTyping(visible,speakerId=null){
   const conversation=activeConversation();if(!conversation){typingRow.classList.remove("visible");return;}
+  const scrollState=captureMessageScrollState();
   if(visible){
     if(conversation.type==="dm")applyCharacterAvatar(typingAvatar,conversation.characterId);
     else if(speakerId&&characterById(speakerId)){applyCharacterAvatar(typingAvatar,speakerId);typingLabel.textContent=`${senderDisplayName(speakerId)}が入力中…`;}
@@ -2500,7 +2619,6 @@ function setTyping(visible,speakerId=null){
   typingRow.classList.toggle("visible",visible);typingRow.setAttribute("aria-hidden",visible?"false":"true");
   if(visible){
     statusText.textContent="入力中…";
-    scrollToBottom();
   }else if(conversation.type==="group"){
     statusText.textContent="6人";
   }else if(presenceSupportedConversation(conversation)){
@@ -2509,6 +2627,7 @@ function setTyping(visible,speakerId=null){
   }else{
     statusText.textContent="オンライン";
   }
+  restoreMessageScrollState(scrollState,{forceBottom:scrollState.pinned,settle:true});
 }
 function autosizeInput(){messageInput.style.height="auto";messageInput.style.height=`${Math.min(messageInput.scrollHeight,120)}px`;const hasContent=Boolean(messageInput.value.trim()||appState.pendingImage);sendButton.disabled=!hasContent||appState.isReplying||!appState.activeConversationId;}
 
@@ -2516,6 +2635,7 @@ function addMessage(conversationId,senderId,text,options={}){
   const conversation=conversationById(conversationId);
   const messages=loadConversationMessages(conversationId);
   const activeVisible=isConversationActuallyVisible(conversationId);
+  const shouldKeepBottom=activeVisible?messageListNearBottom():false;
   const message={
     id:options.id||makeId(),
     pushEventId:options.pushEventId||null,
@@ -2555,8 +2675,7 @@ function addMessage(conversationId,senderId,text,options={}){
 
   if(activeVisible){
     if(senderId!=="mashiro")markIncomingSeen(conversationId);
-    renderMessages();
-    scrollToBottom();
+    renderMessages({scrollMode:shouldKeepBottom?"bottom":"preserve"});
   }
 
   renderTalkList();
@@ -3146,6 +3265,7 @@ function endpointFor(apiEndpoint,kind){
   if(kind==="pushSync")return `${base}/api/push/sync`;
   if(kind==="pushPending")return `${base}/api/push/pending`;
   if(kind==="pushAck")return `${base}/api/push/ack`;
+  if(kind==="pushSeen")return `${base}/api/push/seen`;
   if(kind==="pushUnregister")return `${base}/api/push/unregister`;
   if(kind==="pushTest")return `${base}/api/push/test`;
   if(kind==="pushNatsukiProactiveTest")return `${base}/api/push/test-proactive-natsuki`;
@@ -3772,6 +3892,19 @@ function pushDiagnosticsText(data){
     );
   }
 
+  if(n.phase326Stability){
+    const s=n.phase326Stability;
+    lines.push(
+      "",
+      "Phase 3.2.6 スクロール・未読バッジ: 有効",
+      `最下部固定: ${s.bottomPinning?"有効":"無効"}`,
+      `閲覧位置アンカー保存: ${s.visibleAnchorPreservation?"有効":"無効"}`,
+      `再描画時の位置維持: ${s.fullRerenderSafe?"有効":"無効"}`,
+      `Push受信ACKと実読seenの分離: ${s.ackSeparatedFromSeen?"有効":"無効"}`,
+      `未読バッジ累積: ${s.perMessageBadgeAccumulation?"1メッセージずつ加算":"無効"}`
+    );
+  }
+
   if(n.phase325Consistency){
     const c=n.phase325Consistency;
     lines.push(
@@ -4080,6 +4213,44 @@ async function pullPendingPushMessages(){
   }catch{}
 }
 
+
+function loadPushSeenQueue(){
+  try{
+    const parsed=JSON.parse(localStorage.getItem(PUSH_SEEN_QUEUE_KEY)||"[]");
+    return Array.isArray(parsed)?[...new Set(parsed.map(String).filter(Boolean))].slice(-500):[];
+  }catch{return [];}
+}
+function savePushSeenQueue(ids){
+  const unique=[...new Set((Array.isArray(ids)?ids:[]).map(String).filter(Boolean))].slice(-500);
+  if(unique.length)localStorage.setItem(PUSH_SEEN_QUEUE_KEY,JSON.stringify(unique));
+  else localStorage.removeItem(PUSH_SEEN_QUEUE_KEY);
+}
+function queueSeenPushEvents(eventIds){
+  const incoming=(Array.isArray(eventIds)?eventIds:[]).map(String).filter(Boolean);
+  if(!incoming.length)return;
+  savePushSeenQueue([...loadPushSeenQueue(),...incoming]);
+  clearTimeout(appState.pushSeenSyncTimer);
+  appState.pushSeenSyncTimer=setTimeout(flushSeenPushEvents,180);
+}
+async function flushSeenPushEvents(){
+  if(appState.pushSeenSyncBusy||!pushNotificationsEnabled())return;
+  const ids=loadPushSeenQueue();if(!ids.length)return;
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
+  if(!apiEndpoint||!accessCode)return;
+  appState.pushSeenSyncBusy=true;
+  try{
+    const result=await fetchJsonWithRetry(endpointFor(apiEndpoint,"pushSeen"),{
+      method:"POST",
+      headers:pushAuthHeaders(accessCode),
+      body:JSON.stringify({deviceId:getPushDeviceId(),eventIds:ids})
+    },0);
+    const seenIds=Array.isArray(result?.eventIds)?result.eventIds:ids;
+    const seenSet=new Set(seenIds.map(String));
+    savePushSeenQueue(loadPushSeenQueue().filter(id=>!seenSet.has(id)));
+  }catch{}
+  finally{appState.pushSeenSyncBusy=false;}
+}
+
 function localUnreadCount(){
   let count=0;
   for(const conversation of CONVERSATIONS){
@@ -4113,6 +4284,7 @@ async function pushBridgeTick(){
   if(appState.pushBridgeBusy||!pushNotificationsEnabled())return;
   appState.pushBridgeBusy=true;
   try{
+    await flushSeenPushEvents();
     await pullPendingPushMessages();
     if(document.visibilityState==="visible"){
       await syncPushSnapshotNow();
