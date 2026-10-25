@@ -1502,7 +1502,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.12a-talk-transition-initial-scroll-stability-v1";
+const PUSH_VERSION = "phase3.2.13-proactive-sticker-reaction-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -4340,6 +4340,7 @@ function pushDiagnosticsText(data){
     lines.push(
       "",
       "Phase 3.2.11 キャラクター自発画像メッセージ: 有効",
+      "Phase 3.2.13 キャラクター自発スタンプ・リアクション: 有効",
       "Phase 3.2.12 画像会話コンテキスト・画像記憶: 有効",
       `DM画像形式: 写真単体 / 写真＋添え文 / 短文→写真`,
       `画像候補率: 約${i.imageChancePercent??14}%（自然さ判定で送らない場合あり）`,
@@ -4702,8 +4703,10 @@ async function pullPendingPushMessages(){
       const conversation=conversationById(event?.conversationId);
       const imageAssetId=String(event?.meta?.imageAssetId||"").trim();
       const isImage=event?.meta?.messageType==="image"&&Boolean(proactiveImageAsset(imageAssetId));
+      const pushStickerId=normalizeStickerId(event?.meta?.stickerId)||stickerIdFromText(event?.message);
+      const isSticker=event?.meta?.messageType==="sticker"&&Boolean(pushStickerId);
       const messageText=String(event?.message||"").trim();
-      if(!conversation||!event?.eventId||(!messageText&&!isImage))continue;
+      if(!conversation||!event?.eventId||(!messageText&&!isImage&&!isSticker))continue;
       const messageId=`push-${event.eventId}`;
       const existing=loadConversationMessages(conversation.id).some(m=>m.id===messageId||m.pushEventId===event.eventId);
       if(!existing){
@@ -4712,7 +4715,8 @@ async function pullPendingPushMessages(){
           pushEventId:event.eventId,
           createdAt:event.createdAt||new Date().toISOString(),
           source:"push-proactive",
-          messageType:isImage?"image":"text",
+          messageType:isImage?"image":isSticker?"sticker":"text",
+          stickerId:isSticker?pushStickerId:"",
           imageAssetId:isImage?imageAssetId:"",
           mediaSummary:isImage?String(event?.meta?.mediaSummary||"").slice(0,300):"",
           seenByUser:appState.activeConversationId===conversation.id&&!chatScreen.hidden&&document.visibilityState==="visible"
@@ -5067,12 +5071,26 @@ async function callDmProactive(
               characterId
             )?.createdAt||null,
           recentProactiveHistory:
-            state.recentProactiveHistory||[]
+            state.recentProactiveHistory||[],
+          clientVersion:PUSH_VERSION
         }
       })
     }
   );
 }
+function dmProactiveMessagePlan(result){
+  const stickerId=normalizeStickerId(result?.stickerId);
+  const mode=String(result?.stickerMode||"");
+  const text=String(result?.message||"").trim();
+  if(stickerId&&["sticker_only","text_then_sticker","sticker_then_text"].includes(mode)){
+    const sticker={type:"sticker",text:stickerToken(stickerId),stickerId};
+    const textItem={type:"text",text};
+    if(mode==="sticker_only")return[sticker];
+    return mode==="sticker_then_text"?[sticker,textItem].filter(x=>x.type==="sticker"||x.text):[textItem,sticker].filter(x=>x.type==="sticker"||x.text);
+  }
+  return text?[{type:"text",text}]:[];
+}
+
 async function maybeSendDmProactive(characterId){
   if(document.visibilityState!=="visible")return;
 
@@ -5146,15 +5164,22 @@ async function maybeSendDmProactive(characterId){
     }
 
     if(result?.send&&result.message){
-      addMessage(
-        conv.id,
-        characterId,
-        result.message,
-        {
-          source:"proactive",
-          seenByUser:show
-        }
-      );
+      const proactivePlan=dmProactiveMessagePlan(result);
+      for(let i=0;i<proactivePlan.length;i+=1){
+        const item=proactivePlan[i];
+        if(i>0)await sleep(550);
+        addMessage(
+          conv.id,
+          characterId,
+          item.text,
+          {
+            source:"proactive",
+            seenByUser:show,
+            messageType:item.type==="sticker"?"sticker":"text",
+            stickerId:item.type==="sticker"?item.stickerId:""
+          }
+        );
+      }
 
       if(result?.followUpMemoryKey){
         markFollowUpMemoryRecovered(characterId,result.followUpMemoryKey);
@@ -5206,6 +5231,7 @@ async function callGroupProactive(groupId,accessCode,apiEndpoint,extraContext={}
       proactiveContext:{
         messagesToday:state.dailyCount,
         lastActivityAt:latestMessage(g.conversationId)?.createdAt||null,
+        clientVersion:PUSH_VERSION,
         ...extraContext
       }
     })
@@ -5359,6 +5385,16 @@ async function maybeSendGroupProactive(groupId){
           seenByUser:show
         }
       );
+      const autonomousStickerId=normalizeStickerId(reply?.stickerId);
+      if(autonomousStickerId){
+        await sleep(500);
+        addMessage(
+          g.conversationId,
+          reply.speakerId,
+          stickerToken(autonomousStickerId),
+          {source:"group-autonomous",seenByUser:show,messageType:"sticker",stickerId:autonomousStickerId}
+        );
+      }
       sentCount+=1;
     }
 
