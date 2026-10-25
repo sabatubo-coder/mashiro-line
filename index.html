@@ -519,8 +519,13 @@ button { -webkit-tap-highlight-color: transparent; }
   box-shadow: 0 1px 4px rgba(0,0,0,.07);
   color: #292b2f;
 }
-.sticker-choice-emoji { display: block; font-size: 29px; line-height: 1.05; }
-.sticker-choice-label { display: block; margin-top: 4px; font-size: 9px; }
+.sticker-choice-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+}
+.sticker-choice-label { display: block; margin-top: 2px; font-size: 9px; }
 
 .media-message {
   overflow: hidden;
@@ -554,16 +559,27 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .sticker-message {
-  min-width: 112px;
-  min-height: 102px;
-  padding: 11px 10px 9px;
-  border-radius: 22px;
-  background: rgba(255,255,255,.9);
-  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  width: min(220px, 54vw);
+  min-height: 128px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
   text-align: center;
 }
-.sticker-message-emoji { font-size: 49px; line-height: 1; }
-.sticker-message-label { margin-top: 7px; font-size: 12px; font-weight: 800; color: #4d535a; }
+.sticker-message-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+.sticker-message-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 
 .message-input {
   width: 100%;
@@ -1400,20 +1416,21 @@ const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
-const PUSH_VERSION = "phase3.2-image-photo-sticker-v1";
+const PUSH_VERSION = "phase3.2.1-sticker-image-swap-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
 
 const STICKERS = {
-  smile:{id:"smile",label:"にこ",emoji:"😊"},
-  laugh:{id:"laugh",label:"わはは",emoji:"😆"},
-  ok:{id:"ok",label:"OK",emoji:"👌"},
-  thanks:{id:"thanks",label:"ありがと",emoji:"🙌"},
-  cheer:{id:"cheer",label:"がんばれ",emoji:"💪"},
-  surprise:{id:"surprise",label:"びっくり",emoji:"😳"},
-  sleepy:{id:"sleepy",label:"ねむい",emoji:"😴"},
-  wave:{id:"wave",label:"またね",emoji:"👋"}
+  // smile / cheer IDs are retained so old Phase 3.2 messages remain readable.
+  smile:{id:"smile",label:"おはよ",emoji:"☀️",image:"./assets/stickers/smile.png"},
+  laugh:{id:"laugh",label:"わはは",emoji:"😆",image:"./assets/stickers/laugh.png"},
+  ok:{id:"ok",label:"OK",emoji:"👌",image:"./assets/stickers/ok.png"},
+  thanks:{id:"thanks",label:"ありがと",emoji:"🙌",image:"./assets/stickers/thanks.png"},
+  cheer:{id:"cheer",label:"おつかれ",emoji:"☕",image:"./assets/stickers/cheer.png"},
+  surprise:{id:"surprise",label:"びっくり",emoji:"😳",image:"./assets/stickers/surprise.png"},
+  sleepy:{id:"sleepy",label:"ねむい",emoji:"😴",image:"./assets/stickers/sleepy.png"},
+  wave:{id:"wave",label:"またね",emoji:"👋",image:"./assets/stickers/wave.png"}
 };
 
 
@@ -1668,9 +1685,9 @@ function renderStickerPanel(){
   stickerPanel.replaceChildren();
   for(const sticker of Object.values(STICKERS)){
     const button=document.createElement("button");button.type="button";button.className="sticker-choice";button.dataset.stickerId=sticker.id;
-    const emoji=document.createElement("span");emoji.className="sticker-choice-emoji";emoji.textContent=sticker.emoji;
+    const image=document.createElement("img");image.className="sticker-choice-image";image.src=sticker.image;image.alt=sticker.label;image.loading="lazy";
     const label=document.createElement("span");label.className="sticker-choice-label";label.textContent=sticker.label;
-    button.append(emoji,label);button.addEventListener("click",()=>sendStickerMessage(sticker.id));stickerPanel.appendChild(button);
+    button.append(image,label);button.addEventListener("click",()=>sendStickerMessage(sticker.id));stickerPanel.appendChild(button);
   }
 }
 
@@ -2272,9 +2289,9 @@ function renderMessages(){
     }else if(type==="sticker"){
       const sticker=STICKERS[messageStickerId(message)]||STICKERS.smile;
       contentNode=document.createElement("div");contentNode.className="sticker-message";
-      const emoji=document.createElement("div");emoji.className="sticker-message-emoji";emoji.textContent=sticker.emoji;
+      const image=document.createElement("img");image.className="sticker-message-image";image.src=sticker.image;image.alt=sticker.label;image.loading="lazy";
       const label=document.createElement("div");label.className="sticker-message-label";label.textContent=sticker.label;
-      contentNode.append(emoji,label);
+      contentNode.append(image,label);
     }else{
       contentNode=document.createElement("div");contentNode.className="bubble";contentNode.textContent=message.text;
     }

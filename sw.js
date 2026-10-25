@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-image-photo-sticker-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-1-sticker-image-swap-v1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,7 +6,15 @@ const ASSETS = [
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",
-  "./apple-touch-icon.png"
+  "./apple-touch-icon.png",
+  "./assets/stickers/thanks.png",
+  "./assets/stickers/laugh.png",
+  "./assets/stickers/ok.png",
+  "./assets/stickers/cheer.png",
+  "./assets/stickers/smile.png",
+  "./assets/stickers/surprise.png",
+  "./assets/stickers/sleepy.png",
+  "./assets/stickers/wave.png",
 ];
 
 self.addEventListener("install", (event) => {
