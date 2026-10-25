@@ -1553,7 +1553,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.15a-quote-precision-dm-duplicate-guard-v1";
+const PUSH_VERSION = "phase3.2.15b-typing-reply-timing-link-v1";
 const PROACTIVE_CONTINUITY_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
 const PROACTIVE_CONTINUITY_MAX_STAGES = 3;
 const PROACTIVE_CONTINUITY_START_CHANCE = Object.freeze({natsuki:0.20,shiki:0.16,ichi:0.20,bunji:0.11,sosuke:0.07});
@@ -1662,6 +1662,7 @@ const appState = {
   pushDiagnosticsCharacterId: "natsuki",
   delayedDmTimer: null,
   delayedGroupTimer: null,
+  delayedTypingToken: null,
   presenceTimer: null,
   presenceBusy: false,
   presenceRequestSeq: 0,
@@ -2636,6 +2637,9 @@ function startPresenceScheduler(){
 
 function openConversation(conversationId,pushHistory=true){
   const conversation=conversationById(conversationId);if(!conversation)return;
+  // 別トークの予約入力中表示を持ち越さない。
+  appState.delayedTypingToken=null;
+  setTyping(false);
   const openToken=++appState.chatOpenRenderToken;
   appState.messageScrollRestoreToken+=1;
   chatScreen.classList.add("initializing");
@@ -2650,9 +2654,11 @@ function openConversation(conversationId,pushHistory=true){
   renderMessages({scrollMode:"bottom",settle:false});autosizeInput();
   revealOpenedConversationAtBottom(conversationId,openToken);
   if(presenceSupportedConversation(conversation))schedulePresenceRefresh(80);
+  // 予約返信の入力中時間帯にトークを開いた場合も、その場で表示を復元する。
+  setTimeout(refreshScheduledTypingForActiveConversation,80);
   if(pushHistory)history.pushState({conversationId},"",`#chat=${conversationId}`);
 }
-function showTalkList(pushHistory=true){appState.chatOpenRenderToken+=1;chatScreen.classList.remove("initializing");appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";clearPendingImage();closeStickerPanel();autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
+function showTalkList(pushHistory=true){appState.chatOpenRenderToken+=1;chatScreen.classList.remove("initializing");appState.delayedTypingToken=null;appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";clearPendingImage();closeStickerPanel();autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
 
 
 function revealOpenedConversationAtBottom(conversationId,openToken){
@@ -3363,6 +3369,107 @@ function scheduleOptimisticDmRead(conversation,userMessage){
   };
 }
 
+// Phase 3.2.15b: 入力中表示を返信予定時刻の直前へ連携する。
+// API生成時間そのものではなく、「実際に文字を打っている」ように見える短い時間だけ表示する。
+function replyTypingDurationMs(text,{group=false}={}){
+  const length=Array.from(String(text||"").trim()).length;
+  if(!length)return 0;
+  const minimum=group?850:950;
+  const maximum=group?3000:3400;
+  const base=group?700:800;
+  const perCharacter=group?31:35;
+  const jitter=Math.round(120+Math.random()*300);
+  return Math.round(Math.max(minimum,Math.min(maximum,base+length*perCharacter+jitter)));
+}
+
+function typingStartIso(replyAt,durationMs,notBeforeAt=""){
+  const due=Date.parse(replyAt||"");
+  if(!Number.isFinite(due)||!Number.isFinite(Number(durationMs))||Number(durationMs)<=0)return"";
+  const floor=Date.parse(notBeforeAt||"");
+  if(Number.isFinite(floor)&&floor>=due)return"";
+  const start=Number.isFinite(floor)?Math.max(due-Number(durationMs),floor):due-Number(durationMs);
+  return new Date(start).toISOString();
+}
+
+function delayedReplyHasTypedText(item){
+  return item?.reactionOnly!==true&&Boolean(String(item?.reply||"").trim());
+}
+
+function delayedReplyTypingStartMs(item){
+  if(!delayedReplyHasTypedText(item))return NaN;
+  const explicit=Date.parse(item?.typingStartAt||"");
+  if(Number.isFinite(explicit))return explicit;
+  const due=Date.parse(item?.replyAt||"");
+  let duration=Number(item?.typingDurationMs||0);
+  if(!Number.isFinite(due))return NaN;
+  // 3.2.15a以前に予約済みだった返信にも、更新後は入力中表示を復元する。
+  if(!Number.isFinite(duration)||duration<=0){
+    const length=Array.from(String(item?.reply||"").trim()).length;
+    if(!length)return NaN;
+    duration=Math.max(950,Math.min(3400,980+length*35));
+  }
+  return due-duration;
+}
+
+function delayedReplyNextTriggerMs(item,now=Date.now()){
+  const due=Date.parse(item?.replyAt||"");
+  if(!Number.isFinite(due))return NaN;
+  const start=delayedReplyTypingStartMs(item);
+  if(Number.isFinite(start)&&start>now)return start;
+  return due;
+}
+
+function scheduledTypingToken(kind,item){
+  return `${kind}:${String(item?.token||item?.localMessageId||item?.eventId||"")}`;
+}
+
+function showScheduledTyping(kind,item){
+  if(!item||!isConversationActuallyVisible(item.conversationId))return false;
+  const token=scheduledTypingToken(kind,item);
+  if(appState.delayedTypingToken===token)return true;
+  appState.delayedTypingToken=token;
+  setTyping(true,kind==="group"?item.characterId:null);
+  return true;
+}
+
+function clearScheduledTyping(token=null){
+  if(!appState.delayedTypingToken)return;
+  if(token&&appState.delayedTypingToken!==token)return;
+  appState.delayedTypingToken=null;
+  setTyping(false);
+}
+
+function activeScheduledTypingCandidate(now=Date.now()){
+  const conversationId=appState.activeConversationId;
+  if(!conversationId||!isConversationActuallyVisible(conversationId))return null;
+  const candidates=[];
+  for(const item of loadDelayedDmState().replies){
+    const due=Date.parse(item?.replyAt||"");
+    const start=delayedReplyTypingStartMs(item);
+    if(item?.conversationId===conversationId&&Number.isFinite(due)&&Number.isFinite(start)&&start<=now&&now<due){
+      candidates.push({kind:"dm",item,due});
+    }
+  }
+  for(const item of loadDelayedGroupState().replies){
+    const due=Date.parse(item?.replyAt||"");
+    const start=delayedReplyTypingStartMs(item);
+    if(item?.conversationId===conversationId&&Number.isFinite(due)&&Number.isFinite(start)&&start<=now&&now<due){
+      candidates.push({kind:"group",item,due});
+    }
+  }
+  candidates.sort((a,b)=>a.due-b.due);
+  return candidates[0]||null;
+}
+
+function refreshScheduledTypingForActiveConversation(){
+  const candidate=activeScheduledTypingCandidate();
+  if(candidate){
+    showScheduledTyping(candidate.kind,candidate.item);
+    return;
+  }
+  if(appState.delayedTypingToken)clearScheduledTyping();
+}
+
 function loadDelayedDmState(){
   try{
     const raw=localStorage.getItem(DELAYED_DM_STATE_KEY);
@@ -3410,9 +3517,10 @@ function clearDelayedReplyByEventId(eventId){
 function scheduleDelayedDmTimer(){
   clearTimeout(appState.delayedDmTimer);
   const state=loadDelayedDmState();
+  const now=Date.now();
   const times=[
     ...state.reads.map(item=>Date.parse(item?.readAt||"")),
-    ...state.replies.map(item=>Date.parse(item?.replyAt||""))
+    ...state.replies.map(item=>delayedReplyNextTriggerMs(item,now))
   ].filter(Number.isFinite);
 
   if(!times.length)return;
@@ -3440,6 +3548,16 @@ async function processDelayedDmState(){
   }
   state.reads=remainingReads;
 
+  // 返信予定の直前にだけ「入力中…」を表示する。
+  const dmTypingCandidate=state.replies
+    .filter(item=>{
+      const due=Date.parse(item?.replyAt||"");
+      const start=delayedReplyTypingStartMs(item);
+      return item?.conversationId===appState.activeConversationId&&Number.isFinite(due)&&Number.isFinite(start)&&start<=now&&now<due;
+    })
+    .sort((a,b)=>Date.parse(a.replyAt)-Date.parse(b.replyAt))[0];
+  if(dmTypingCandidate)showScheduledTyping("dm",dmTypingCandidate);
+
   const remainingReplies=[];
   for(const item of state.replies){
     const due=Date.parse(item?.replyAt||"");
@@ -3459,6 +3577,8 @@ async function processDelayedDmState(){
         (item.eventId&&message.pushEventId===item.eventId)||
         message.id===item.localMessageId
       );
+
+    clearScheduledTyping(scheduledTypingToken("dm",item));
 
     if(item.reaction?.emoji){
       addReactionToMessage(item.conversationId,item.reaction.targetMessageId,item.characterId,item.reaction.emoji,item.replyAt);
@@ -3489,6 +3609,7 @@ async function processDelayedDmState(){
 
   if(changed)saveDelayedDmState(state);
   scheduleDelayedDmTimer();
+  refreshScheduledTypingForActiveConversation();
 }
 
 function enqueueDelayedDmResult(conversation,userMessage,result){
@@ -3508,12 +3629,16 @@ function enqueueDelayedDmResult(conversation,userMessage,result){
   });
 
   const eventId=result?.scheduledReply?.eventId||null;
+  const dmReplyText=String(result.reply||"").trim();
+  const dmTypingDurationMs=result?.reactionOnly===true?0:replyTypingDurationMs(dmReplyText);
   state.replies=state.replies.filter(item=>item?.token!==token);
   state.replies.push({
     token,
     conversationId:conversation.id,
     characterId:conversation.characterId,
-    reply:String(result.reply||"").trim(),
+    reply:dmReplyText,
+    typingDurationMs:dmTypingDurationMs,
+    typingStartAt:typingStartIso(timing.replyAt,dmTypingDurationMs,timing.readAt),
     reaction:hasReaction?{emoji:normalizeReactionEmoji(result.reaction.emoji),targetMessageId:String(result.reaction.targetMessageId||userMessage.id)}:null,
     reactionOnly:result?.reactionOnly===true,
     replyTo:result?.replyTo||null,
@@ -3597,9 +3722,10 @@ function scheduleDelayedGroupTimer(){
   clearTimeout(appState.delayedGroupTimer);
 
   const state=loadDelayedGroupState();
+  const now=Date.now();
   const times=[
     ...state.reads.map(item=>Date.parse(item?.readAt||"")),
-    ...state.replies.map(item=>Date.parse(item?.replyAt||""))
+    ...state.replies.map(item=>delayedReplyNextTriggerMs(item,now))
   ].filter(Number.isFinite);
 
   if(!times.length)return;
@@ -3632,6 +3758,16 @@ async function processDelayedGroupState(){
     }
   }
   state.reads=remainingReads;
+
+  // グループも各人物の返信予定直前だけ、その人物名で入力中表示する。
+  const groupTypingCandidate=state.replies
+    .filter(item=>{
+      const due=Date.parse(item?.replyAt||"");
+      const start=delayedReplyTypingStartMs(item);
+      return item?.conversationId===appState.activeConversationId&&Number.isFinite(due)&&Number.isFinite(start)&&start<=now&&now<due;
+    })
+    .sort((a,b)=>Date.parse(a.replyAt)-Date.parse(b.replyAt))[0];
+  if(groupTypingCandidate)showScheduledTyping("group",groupTypingCandidate);
 
   // 返信は、その人物の既読を必ず付けてから表示する。
   const sortedReplies=[...state.replies].sort(
@@ -3675,11 +3811,7 @@ async function processDelayedGroupState(){
         !chatScreen.hidden&&
         document.visibilityState==="visible";
 
-      if(visible){
-        setTyping(true,item.characterId);
-        await sleep(450+Math.min(850,String(item.reply).length*12));
-        setTyping(false);
-      }
+      clearScheduledTyping(scheduledTypingToken("group",item));
 
       addMessage(
         item.conversationId,
@@ -3706,6 +3838,7 @@ async function processDelayedGroupState(){
 
   if(changed)saveDelayedGroupState(state);
   scheduleDelayedGroupTimer();
+  refreshScheduledTypingForActiveConversation();
 }
 
 function enqueueDelayedGroupResult(conversation,userMessage,result){
@@ -3757,13 +3890,17 @@ function enqueueDelayedGroupResult(conversation,userMessage,result){
 
     const eventId=reply?.scheduledReply?.eventId||null;
     const token=`${tokenBase}-reply-${index}-${reply.speakerId}`;
+    const groupReplyText=String(reply.message).trim();
+    const groupTypingDurationMs=replyTypingDurationMs(groupReplyText,{group:true});
 
     state.replies.push({
       token,
       conversationId:conversation.id,
       characterId:reply.speakerId,
       throughCreatedAt:userMessage.createdAt,
-      reply:String(reply.message).trim(),
+      reply:groupReplyText,
+      typingDurationMs:groupTypingDurationMs,
+      typingStartAt:typingStartIso(timing.replyAt,groupTypingDurationMs,timing.readAt),
       reaction:normalizeReactionEmoji(reply?.reaction?.emoji)?{emoji:normalizeReactionEmoji(reply.reaction.emoji),targetMessageId:String(reply.reaction.targetMessageId||userMessage.id)}:null,
       replyTo:reply?.replyTo||null,
       readAt:timing.readAt||"",
@@ -3960,8 +4097,9 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
         await sleep(350);markOutgoingReadThrough(conversation.id,userMessage.createdAt);
         applyBackendReaction(conversation,result,userMessage.id);
         if(!result?.reactionOnly&&String(result?.reply||"").trim()){
-          setTyping(true);await sleep(650);setTyping(false);
-          addMessage(conversation.id,conversation.characterId,String(result.reply||"").trim(),{source:"ai",seenByUser:true,...replyQuoteOptions(conversation.id,result?.replyTo)});
+          const immediateReply=String(result.reply||"").trim();
+          setTyping(true);await sleep(replyTypingDurationMs(immediateReply));setTyping(false);
+          addMessage(conversation.id,conversation.characterId,immediateReply,{source:"ai",seenByUser:true,...replyQuoteOptions(conversation.id,result?.replyTo)});
         }
         scheduleDmProactive(conversation.characterId,"normal");
       }
@@ -3974,12 +4112,12 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
       if(result?.groupTiming&&enqueueDelayedGroupResult(conversation,userMessage,result)){
         // 既読・返信は各キャラの生活モデル時刻に従う。
       }else{
-        await sleep(350);markOutgoingRead(conversation.id);setTyping(true);
-        const replies=Array.isArray(result.replies)?result.replies.slice(0,36):[];setTyping(false);
+        await sleep(350);markOutgoingRead(conversation.id);
+        const replies=Array.isArray(result.replies)?result.replies.slice(0,36):[];
         for(const reply of replies){
           if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
           if(normalizeReactionEmoji(reply?.reaction?.emoji)){addReactionToMessage(conversation.id,String(reply.reaction.targetMessageId||userMessage.id),reply.speakerId,reply.reaction.emoji);}
-          setTyping(true,reply.speakerId);await sleep(550+Math.min(850,String(reply.message).length*12));setTyping(false);
+          setTyping(true,reply.speakerId);await sleep(replyTypingDurationMs(reply.message,{group:true}));setTyping(false);
           addMessage(conversation.id,reply.speakerId,String(reply.message).trim(),{source:"group-ai-fallback",seenByUser:true,...replyQuoteOptions(conversation.id,reply?.replyTo)});
         }
       }
@@ -5345,8 +5483,6 @@ async function maybeSendDmProactive(characterId){
     appState.activeConversationId===conv.id &&
     !chatScreen.hidden;
 
-  if(show)setTyping(true,characterId);
-
   try{
     const result=await callDmProactive(
       characterId,
@@ -5354,16 +5490,16 @@ async function maybeSendDmProactive(characterId){
       apiEndpoint
     );
 
-    if(show){
-      await sleep(700);
-      setTyping(false);
-    }
-
     if(result?.send&&result.message){
       const proactivePlan=dmProactiveMessagePlan(result);
       for(let i=0;i<proactivePlan.length;i+=1){
         const item=proactivePlan[i];
         if(i>0)await sleep(550);
+        if(show&&item.type!=="sticker"&&String(item.text||"").trim()){
+          setTyping(true,characterId);
+          await sleep(replyTypingDurationMs(item.text));
+          setTyping(false);
+        }
         addMessage(
           conv.id,
           characterId,
@@ -5536,11 +5672,8 @@ async function maybeSendGroupProactive(groupId){
     !chatScreen.hidden;
   const sessionRequestedAt=Date.now();
 
-  if(show)setTyping(true);
-
   try{
     const result=await callGroupProactive(groupId,accessCode,apiEndpoint);
-    if(show)setTyping(false);
 
     const replies=Array.isArray(result?.replies)?result.replies.slice(0,5):[];
     if(!replies.length){
@@ -5569,7 +5702,7 @@ async function maybeSendGroupProactive(groupId){
 
       if(show){
         setTyping(true,reply.speakerId);
-        await sleep(650+Math.min(1000,String(reply.message).length*15));
+        await sleep(replyTypingDurationMs(reply.message,{group:true}));
         setTyping(false);
       }
 
