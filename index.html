@@ -1441,7 +1441,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.8-push-delivery-diagnostics-reliability-v1";
+const PUSH_VERSION = "phase3.2.9-cross-channel-online-proactive-freshness-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -2034,6 +2034,75 @@ function presenceSupportedConversation(conversation){
   );
 }
 
+
+function latestCharacterLineActivityAt(characterId){
+  let latestMs=0;
+
+  for(const conversation of CONVERSATIONS){
+    if(
+      conversation.type==="dm" &&
+      conversation.characterId!==characterId
+    ){
+      continue;
+    }
+
+    if(conversation.type==="group"){
+      const group=groupById(conversation.groupId);
+      if(!groupAiParticipantIds(group).includes(characterId)){
+        continue;
+      }
+    }
+
+    const messages=loadConversationMessages(conversation.id);
+
+    for(const message of messages){
+      let candidate="";
+
+      if(message.senderId===characterId){
+        candidate=message.createdAt||"";
+      }else if(message.senderId==="mashiro"){
+        if(conversation.type==="dm"){
+          if(message.readByCharacter&&message.readAt){
+            candidate=message.readAt;
+          }
+        }else{
+          const perCharacter=
+            message.readAtByCharacter &&
+            typeof message.readAtByCharacter==="object"
+              ?message.readAtByCharacter[characterId]
+              :"";
+
+          if(perCharacter){
+            candidate=perCharacter;
+          }else if(message.readByCharacter&&message.readAt){
+            candidate=message.readAt;
+          }
+        }
+      }
+
+      const ms=Date.parse(candidate||"");
+      if(Number.isFinite(ms)&&ms>latestMs){
+        latestMs=ms;
+      }
+    }
+  }
+
+  return latestMs
+    ?new Date(latestMs).toISOString()
+    :"";
+}
+
+function characterActivityAtForAPI(){
+  const result={};
+
+  for(const characterId of PRESENCE_SUPPORTED_CHARACTERS){
+    const at=latestCharacterLineActivityAt(characterId);
+    if(at)result[characterId]=at;
+  }
+
+  return result;
+}
+
 function latestDmCharacterActivityAt(conversationId,characterId){
   const messages=loadConversationMessages(conversationId);
   let latestMs=0;
@@ -2105,10 +2174,14 @@ async function refreshPresenceStatus({force=false}={}){
         body:JSON.stringify({
           characterId:conversation.characterId,
           timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
-          latestActivityAt:latestDmCharacterActivityAt(
-            conversation.id,
-            conversation.characterId
-          )
+          latestActivityAt:
+            latestCharacterLineActivityAt(
+              conversation.characterId
+            ) ||
+            latestDmCharacterActivityAt(
+              conversation.id,
+              conversation.characterId
+            )
         })
       },
       0
@@ -2760,30 +2833,30 @@ function localDmActiveSessionPreview(conversation,userMessage){
     statusText.textContent.trim()!=="オンライン"
   )return null;
 
-  const messages=loadConversationMessages(conversation.id);
-  const index=messages.findIndex(message=>message.id===userMessage.id);
-  if(index<=0)return null;
-
-  const previous=messages[index-1];
-  if(previous?.senderId!==conversation.characterId)return null;
-
-  const previousAt=Date.parse(previous.createdAt||"");
+  const activityAt=latestCharacterLineActivityAt(
+    conversation.characterId
+  );
+  const activityMs=Date.parse(activityAt||"");
   const userAt=Date.parse(userMessage.createdAt||"");
-  const windowMs=LOCAL_ACTIVE_SESSION_WINDOWS_MS[conversation.characterId]||0;
+  const windowMs=
+    LOCAL_ACTIVE_SESSION_WINDOWS_MS[
+      conversation.characterId
+    ]||0;
 
   if(
-    !Number.isFinite(previousAt) ||
+    !Number.isFinite(activityMs) ||
     !Number.isFinite(userAt) ||
     windowMs<=0 ||
-    Math.max(0,userAt-previousAt)>windowMs
+    Math.max(0,userAt-activityMs)>windowMs
   )return null;
 
   return {
     active:true,
     characterId:conversation.characterId,
-    previousAt,
+    latestCharacterLineActivityAt:activityAt,
     userAt,
-    windowMs
+    windowMs,
+    crossChannel:true
   };
 }
 
@@ -3301,7 +3374,7 @@ async function recentHistoryWithLatestImageForAPI(conversationId){
 
 async function fetchJsonWithRetry(endpoint,options,retries=1){let lastError;for(let attempt=0;attempt<=retries;attempt++){const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),60000);try{const response=await fetch(endpoint,{...options,signal:controller.signal,cache:"no-store"});const data=await response.json().catch(()=>({}));if(response.status===401){localStorage.removeItem(ACCESS_CODE_KEY);throw Object.assign(new Error("invalid_app_code"),{code:"invalid_app_code"});}if(!response.ok){const e=Object.assign(new Error(String(data?.error||`http_${response.status}`)),{code:[429,500,502,503,504].includes(response.status)?"temporary_error":response.status===403?"origin_not_allowed":"api_error"});throw e;}return data;}catch(error){lastError=error;const retryable=error?.name==="AbortError"||error instanceof TypeError||error?.code==="temporary_error";if(!retryable||attempt===retries)throw error;await sleep(1800);}finally{clearTimeout(timeout);}}throw lastError;}
 
-async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);const messages=await recentHistoryWithLatestImageForAPI(conversation.id);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages,memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true})});}
+async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);const messages=await recentHistoryWithLatestImageForAPI(conversation.id);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages,memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,characterActivityAt:characterActivityAtForAPI(),deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true})});}
 function privateMemoriesForGroup(group){const map={};for(const id of group.participants){if(id!=="mashiro"&&characterById(id))map[id]=memoriesForAPI(id);}return map;}
 async function callGroupChat(conversation,accessCode,apiEndpoint){
   const group=groupById(conversation.groupId);
@@ -3324,6 +3397,7 @@ async function callGroupChat(conversation,accessCode,apiEndpoint){
           {dateStyle:"full",timeStyle:"short"}
         ),
         timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+        characterActivityAt:characterActivityAtForAPI(),
         deviceId:pushNotificationsEnabled()?getPushDeviceId():"",
         scheduleDelayedReply:true
       })
@@ -3902,6 +3976,20 @@ function pushDiagnosticsText(data){
       `再描画時の位置維持: ${s.fullRerenderSafe?"有効":"無効"}`,
       `Push受信ACKと実読seenの分離: ${s.ackSeparatedFromSeen?"有効":"無効"}`,
       `未読バッジ累積: ${s.perMessageBadgeAccumulation?"1メッセージずつ加算":"無効"}`
+    );
+  }
+
+  if(n.phase329ConversationQuality){
+    const q=n.phase329ConversationQuality;
+    lines.push(
+      "",
+      "Phase 3.2.9 横断オンライン・自発話題新鮮度: 有効",
+      `オンライン共有範囲: ${q.onlineScope==="character_wide_dm_and_group"?"DM↔グループでキャラ単位":"トーク単位"}`,
+      `DM→グループ高速既読: ${q.dmToGroupFastRead?"有効":"無効"}`,
+      `グループ→DM高速既読: ${q.groupToDmFastRead?"有効":"無効"}`,
+      `自発話題: 新規${q.proactiveContinuityWeights?.newTopic??68}% / 続き${q.proactiveContinuityWeights?.continueRecent??22}% / 少し前の記憶${q.proactiveContinuityWeights?.olderMemory??10}%`,
+      `個別自発LINE意味重複ガード: ${q.proactiveSemanticRepeatGuard?"有効":"無効"}`,
+      `意味重複の参照期間: 最大${q.proactiveRepeatWindowDays??7}日`
     );
   }
 
@@ -4515,17 +4603,217 @@ function randomBetween(min,max){return min+Math.random()*(max-min);}
 function isQuietTime(date=new Date()){const h=date.getHours()+date.getMinutes()/60;return h>=22.5||h<7;}
 function nextMorningTimestamp(){const t=new Date();t.setDate(t.getDate()+(t.getHours()>=22?1:0));t.setHours(7,15+Math.floor(Math.random()*45),0,0);return t.getTime();}
 
-function loadDmProactiveState(characterId){const c=characterById(characterId),now=Date.now();try{const raw=localStorage.getItem(proactiveKey(characterId));if(raw){const p=JSON.parse(raw);if(p.dailyDate!==dateKey()){p.dailyDate=dateKey();p.dailyCount=0;}if(!Number.isFinite(Number(p.nextDueAt)))p.nextDueAt=now+randomBetween(c.proactive.normalMinMs,c.proactive.normalMaxMs);return{nextDueAt:Number(p.nextDueAt),lastSentAt:Number(p.lastSentAt||0),dailyDate:p.dailyDate||dateKey(),dailyCount:Number(p.dailyCount||0)};}}catch{}return{nextDueAt:now+randomBetween(c.proactive.normalMinMs,c.proactive.normalMaxMs),lastSentAt:0,dailyDate:dateKey(),dailyCount:0};}
+function loadDmProactiveState(characterId){
+  const c=characterById(characterId),now=Date.now();
+
+  try{
+    const raw=localStorage.getItem(
+      proactiveKey(characterId)
+    );
+
+    if(raw){
+      const p=JSON.parse(raw);
+
+      if(p.dailyDate!==dateKey()){
+        p.dailyDate=dateKey();
+        p.dailyCount=0;
+      }
+
+      if(!Number.isFinite(Number(p.nextDueAt))){
+        p.nextDueAt=
+          now+randomBetween(
+            c.proactive.normalMinMs,
+            c.proactive.normalMaxMs
+          );
+      }
+
+      return{
+        nextDueAt:Number(p.nextDueAt),
+        lastSentAt:Number(p.lastSentAt||0),
+        dailyDate:p.dailyDate||dateKey(),
+        dailyCount:Number(p.dailyCount||0),
+        recentProactiveHistory:
+          Array.isArray(p.recentProactiveHistory)
+            ?p.recentProactiveHistory.slice(-12)
+            :[]
+      };
+    }
+  }catch{}
+
+  return{
+    nextDueAt:
+      now+randomBetween(
+        c.proactive.normalMinMs,
+        c.proactive.normalMaxMs
+      ),
+    lastSentAt:0,
+    dailyDate:dateKey(),
+    dailyCount:0,
+    recentProactiveHistory:[]
+  };
+}
 function saveDmProactiveState(id,state){localStorage.setItem(proactiveKey(id),JSON.stringify(state));schedulePushSync();}
 function scheduleDmProactive(id,mode="normal"){const c=characterById(id),s=loadDmProactiveState(id),now=Date.now();if(isQuietTime())s.nextDueAt=nextMorningTimestamp();else if(mode==="retry")s.nextDueAt=now+randomBetween(12*60*1000,25*60*1000);else s.nextDueAt=now+randomBetween(c.proactive.normalMinMs,c.proactive.normalMaxMs);saveDmProactiveState(id,s);}
 function latestMessage(conversationId,senderId=null){const messages=loadConversationMessages(conversationId);for(let i=messages.length-1;i>=0;i--){if(!senderId||messages[i].senderId===senderId)return messages[i];}return null;}
 
-async function callDmProactive(characterId,accessCode,apiEndpoint){const c=characterById(characterId),conv=conversationById(c.conversationId),state=loadDmProactiveState(characterId);return fetchJsonWithRetry(endpointFor(apiEndpoint,"proactive"),{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId,conversationId:conv.id,messages:recentHistoryForAPI(conv.id),memories:memoriesForAPI(characterId),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,proactiveContext:{messagesToday:state.dailyCount,lastUserActivityAt:latestMessage(conv.id,"mashiro")?.createdAt||null,lastCharacterMessageAt:latestMessage(conv.id,characterId)?.createdAt||null}})});}
+async function callDmProactive(
+  characterId,
+  accessCode,
+  apiEndpoint
+){
+  const c=characterById(characterId);
+  const conv=conversationById(c.conversationId);
+  const state=loadDmProactiveState(characterId);
+
+  return fetchJsonWithRetry(
+    endpointFor(apiEndpoint,"proactive"),
+    {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "X-App-Code":accessCode
+      },
+      body:JSON.stringify({
+        characterId,
+        conversationId:conv.id,
+        messages:recentHistoryForAPI(conv.id),
+        memories:memoriesForAPI(characterId),
+        currentTime:new Date().toLocaleString(
+          "ja-JP",
+          {dateStyle:"full",timeStyle:"short"}
+        ),
+        timezone:
+          Intl.DateTimeFormat()
+            .resolvedOptions()
+            .timeZone,
+        proactiveContext:{
+          messagesToday:state.dailyCount,
+          lastUserActivityAt:
+            latestMessage(
+              conv.id,
+              "mashiro"
+            )?.createdAt||null,
+          lastCharacterMessageAt:
+            latestMessage(
+              conv.id,
+              characterId
+            )?.createdAt||null,
+          recentProactiveHistory:
+            state.recentProactiveHistory||[]
+        }
+      })
+    }
+  );
+}
 async function maybeSendDmProactive(characterId){
-  if(document.visibilityState!=="visible")return;const c=characterById(characterId),conv=conversationById(c.conversationId),state=loadDmProactiveState(characterId);if(Date.now()<state.nextDueAt)return;if(isQuietTime()){scheduleDmProactive(characterId);return;}if(state.dailyCount>=c.proactive.dailyMax){state.nextDueAt=nextMorningTimestamp();saveDmProactiveState(characterId,state);return;}
-  const latestUser=latestMessage(conv.id,"mashiro"),latestChar=latestMessage(conv.id,characterId),latestAny=latestMessage(conv.id),now=Date.now();if(latestUser&&now-Date.parse(latestUser.createdAt)<c.proactive.recentUserCooldownMs){scheduleDmProactive(characterId,"retry");return;}if(latestAny?.senderId===characterId&&latestChar&&now-Date.parse(latestChar.createdAt)<c.proactive.recentCharacterCooldownMs){scheduleDmProactive(characterId);return;}
-  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();if(!apiEndpoint||!accessCode){scheduleDmProactive(characterId,"retry");return;}await warmBackend(apiEndpoint);const show=appState.activeConversationId===conv.id&&!chatScreen.hidden;if(show)setTyping(true,characterId);
-  try{const result=await callDmProactive(characterId,accessCode,apiEndpoint);if(show){await sleep(700);setTyping(false);}if(result?.send&&result.message){addMessage(conv.id,characterId,result.message,{source:"proactive",seenByUser:show});state.lastSentAt=Date.now();state.dailyCount+=1;saveDmProactiveState(characterId,state);scheduleDmProactive(characterId);}else scheduleDmProactive(characterId,"retry");}catch{if(show)setTyping(false);scheduleDmProactive(characterId,"retry");}
+  if(document.visibilityState!=="visible")return;
+
+  const c=characterById(characterId);
+  const conv=conversationById(c.conversationId);
+  const state=loadDmProactiveState(characterId);
+
+  if(Date.now()<state.nextDueAt)return;
+
+  if(isQuietTime()){
+    scheduleDmProactive(characterId);
+    return;
+  }
+
+  if(state.dailyCount>=c.proactive.dailyMax){
+    state.nextDueAt=nextMorningTimestamp();
+    saveDmProactiveState(characterId,state);
+    return;
+  }
+
+  const latestUser=latestMessage(conv.id,"mashiro");
+  const latestChar=latestMessage(conv.id,characterId);
+  const latestAny=latestMessage(conv.id);
+  const now=Date.now();
+
+  if(
+    latestUser &&
+    now-Date.parse(latestUser.createdAt)<
+      c.proactive.recentUserCooldownMs
+  ){
+    scheduleDmProactive(characterId,"retry");
+    return;
+  }
+
+  if(
+    latestAny?.senderId===characterId &&
+    latestChar &&
+    now-Date.parse(latestChar.createdAt)<
+      c.proactive.recentCharacterCooldownMs
+  ){
+    scheduleDmProactive(characterId);
+    return;
+  }
+
+  const apiEndpoint=getApiEndpoint();
+  const accessCode=getAccessCode();
+
+  if(!apiEndpoint||!accessCode){
+    scheduleDmProactive(characterId,"retry");
+    return;
+  }
+
+  await warmBackend(apiEndpoint);
+
+  const show=
+    appState.activeConversationId===conv.id &&
+    !chatScreen.hidden;
+
+  if(show)setTyping(true,characterId);
+
+  try{
+    const result=await callDmProactive(
+      characterId,
+      accessCode,
+      apiEndpoint
+    );
+
+    if(show){
+      await sleep(700);
+      setTyping(false);
+    }
+
+    if(result?.send&&result.message){
+      addMessage(
+        conv.id,
+        characterId,
+        result.message,
+        {
+          source:"proactive",
+          seenByUser:show
+        }
+      );
+
+      state.lastSentAt=Date.now();
+      state.dailyCount+=1;
+      state.recentProactiveHistory=[
+        ...(state.recentProactiveHistory||[]),
+        {
+          at:Date.now(),
+          topicKey:
+            String(result.topicKey||"").slice(0,160),
+          topicOrigin:
+            String(result.topicOrigin||"").slice(0,40),
+          topicContinuity:
+            String(result.topicContinuity||"").slice(0,40),
+          text:
+            String(result.message||"").slice(0,500)
+        }
+      ].slice(-12);
+
+      saveDmProactiveState(characterId,state);
+      scheduleDmProactive(characterId);
+    }else{
+      scheduleDmProactive(characterId,"retry");
+    }
+  }catch{
+    if(show)setTyping(false);
+    scheduleDmProactive(characterId,"retry");
+  }
 }
 
 function loadGroupProactiveState(groupId){const g=groupById(groupId),now=Date.now();try{const raw=localStorage.getItem(groupProactiveKey(groupId));if(raw){const p=JSON.parse(raw);if(p.dailyDate!==dateKey()){p.dailyDate=dateKey();p.dailyCount=0;}if(!Number.isFinite(Number(p.nextDueAt)))p.nextDueAt=now+randomBetween(g.proactive.normalMinMs,g.proactive.normalMaxMs);return{nextDueAt:Number(p.nextDueAt),lastSentAt:Number(p.lastSentAt||0),dailyDate:p.dailyDate||dateKey(),dailyCount:Number(p.dailyCount||0)};}}catch{}return{nextDueAt:now+randomBetween(g.proactive.normalMinMs,g.proactive.normalMaxMs),lastSentAt:0,dailyDate:dateKey(),dailyCount:0};}
