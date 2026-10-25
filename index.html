@@ -1441,7 +1441,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.9-cross-channel-online-proactive-freshness-v1";
+const PUSH_VERSION = "phase3.2.10-cross-channel-memory-followup-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -1859,27 +1859,137 @@ function saveGroupMemories(groupId, memories) { localStorage.setItem(groupMemory
 function normalizeMemoryText(text) { return String(text||"").trim().replace(/\s+/g," ").replace(/[。．.]+$/g,"").toLowerCase(); }
 function memoryExpiryFromTTL(ttlDays) { const d=Number(ttlDays); if(!Number.isFinite(d)||d>=3650)return null; const x=new Date();x.setDate(x.getDate()+Math.max(1,d));return x.toISOString(); }
 
-function mergeCandidatesIntoList(existingList, candidates) {
-  if (!Array.isArray(candidates) || !candidates.length) return existingList;
+function followUpUntilFromDays(days) {
+  const d = Number(days);
+  if (!Number.isFinite(d) || d <= 0) return "";
+  return new Date(Date.now() + Math.min(14, Math.max(1, d)) * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function mergeCandidatesIntoList(existingList, candidates, context = {}) {
+  if (!Array.isArray(candidates) || !candidates.length) return pruneMemories(existingList);
   const memories = pruneMemories(existingList);
   const nowIso = new Date().toISOString();
+  const sourceType = ["dm","group","legacy"].includes(context?.sourceType) ? context.sourceType : "legacy";
+  const sourceConversationId = String(context?.sourceConversationId || "").slice(0,160);
+  const knownBy = String(context?.knownBy || "").slice(0,80);
+
   for (const candidate of candidates.slice(0,3)) {
     const text=String(candidate?.text||"").trim().slice(0,240); if(!text)continue;
     const key=String(candidate?.key||"").trim().toLowerCase().replace(/[^a-z0-9_]+/g,"_").replace(/^_+|_+$/g,"").slice(0,80);
     const category=["event","preference","habit","promise","relationship","school","other"].includes(candidate?.category)?candidate.category:"other";
     const importance=[1,2,3].includes(Number(candidate?.importance))?Number(candidate.importance):1;
+    const followUpStatus=["none","open","resolved"].includes(candidate?.followUpStatus)?candidate.followUpStatus:"none";
+    const followUpUntil = followUpStatus === "open"
+      ? followUpUntilFromDays(candidate?.followUpUntilDays || 3)
+      : "";
     const normalized=normalizeMemoryText(text);
     let existing=key?memories.find(m=>m.key===key):null;
     if(!existing) existing=memories.find(m=>normalizeMemoryText(m.text)===normalized)||null;
-    if(existing){ existing.key=key||existing.key; existing.text=text; existing.category=category; existing.importance=Math.max(Number(existing.importance||1),importance); existing.updatedAt=nowIso; existing.expiresAt=memoryExpiryFromTTL(candidate?.ttlDays); }
-    else memories.push({id:makeId(),key:key||`memory_${Date.now()}`,text,category,importance,createdAt:nowIso,updatedAt:nowIso,expiresAt:memoryExpiryFromTTL(candidate?.ttlDays)});
+
+    if(existing){
+      existing.key=key||existing.key;
+      existing.text=text;
+      existing.category=category;
+      existing.importance=Math.max(Number(existing.importance||1),importance);
+      existing.updatedAt=nowIso;
+      existing.expiresAt=memoryExpiryFromTTL(candidate?.ttlDays);
+      existing.learnedAt=existing.learnedAt||nowIso;
+      existing.sourceType=sourceType||existing.sourceType||"legacy";
+      existing.sourceConversationId=sourceConversationId||existing.sourceConversationId||"";
+      existing.knownBy=knownBy||existing.knownBy||"";
+      existing.followUpStatus=followUpStatus;
+      if(followUpStatus==="open") existing.followUpUntil=followUpUntil||existing.followUpUntil||"";
+      if(followUpStatus==="resolved") {
+        existing.followUpUntil="";
+        existing.updatedAt=nowIso;
+      }
+      if(!Number.isFinite(Number(existing.recallCount))) existing.recallCount=0;
+    } else {
+      memories.push({
+        id:makeId(),
+        key:key||`memory_${Date.now()}`,
+        text,
+        category,
+        importance,
+        createdAt:nowIso,
+        updatedAt:nowIso,
+        learnedAt:nowIso,
+        expiresAt:memoryExpiryFromTTL(candidate?.ttlDays),
+        sourceType,
+        sourceConversationId,
+        knownBy,
+        followUpStatus,
+        followUpUntil,
+        followUpRecoveredAt:"",
+        lastRecalledAt:"",
+        recallCount:0
+      });
+    }
   }
   return pruneMemories(memories);
 }
-function mergeMemoryCandidates(characterId,candidates){ saveMemories(characterId, mergeCandidatesIntoList(loadMemories(characterId),candidates)); }
-function mergeGroupMemoryCandidates(groupId,candidates){ saveGroupMemories(groupId, mergeCandidatesIntoList(loadGroupMemories(groupId),candidates)); }
+
+function mergeMemoryCandidates(characterId,candidates,context={}){
+  saveMemories(
+    characterId,
+    mergeCandidatesIntoList(
+      loadMemories(characterId),
+      candidates,
+      {
+        ...context,
+        knownBy:characterId
+      }
+    )
+  );
+}
+
+function mergeGroupMemoryCandidates(groupId,candidates,context={}){
+  saveGroupMemories(
+    groupId,
+    mergeCandidatesIntoList(
+      loadGroupMemories(groupId),
+      candidates,
+      {
+        ...context,
+        knownBy:`group:${groupId}`
+      }
+    )
+  );
+}
+
+function propagateGroupMemoryCandidatesToParticipants(group,candidates){
+  if(!group||!Array.isArray(candidates)||!candidates.length)return;
+  for(const characterId of (group.participants||[]).filter(id=>id!=="mashiro")){
+    if(!characterById(characterId))continue;
+    mergeMemoryCandidates(characterId,candidates,{
+      sourceType:"group",
+      sourceConversationId:group.conversationId
+    });
+  }
+}
+
+function markFollowUpMemoryRecovered(characterId,key){
+  const safeKey=String(key||"").trim();
+  if(!safeKey)return;
+  const nowIso=new Date().toISOString();
+  const memories=loadMemories(characterId).map(memory=>{
+    if(String(memory?.key||"")!==safeKey)return memory;
+    return{
+      ...memory,
+      followUpStatus:"resolved",
+      followUpUntil:"",
+      followUpRecoveredAt:nowIso,
+      lastRecalledAt:nowIso,
+      recallCount:Math.max(0,Number(memory?.recallCount||0))+1,
+      updatedAt:nowIso
+    };
+  });
+  saveMemories(characterId,memories);
+}
+
 function memoriesForAPI(characterId){ const m=loadMemories(characterId); saveMemories(characterId,m); return m.slice(0,MAX_MEMORIES_SENT_TO_AI); }
 function groupMemoriesForAPI(groupId){ const m=loadGroupMemories(groupId); saveGroupMemories(groupId,m); return m.slice(0,MAX_MEMORIES_SENT_TO_AI); }
+
 
 function getAvatarData(characterId){return localStorage.getItem(avatarKey(characterId))||"";}
 function setAvatarData(characterId,dataUrl){ if(dataUrl)localStorage.setItem(avatarKey(characterId),dataUrl); else localStorage.removeItem(avatarKey(characterId)); }
@@ -3459,7 +3569,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
     if(conversation.type==="dm"){
       const result=await callDmChat(conversation,accessCode,apiEndpoint);
       if(result?.mediaSummary)updateMessageMediaSummary(conversation.id,userMessage.id,result.mediaSummary);
-      mergeMemoryCandidates(conversation.characterId,result.memoryCandidates);
+      mergeMemoryCandidates(conversation.characterId,result.memoryCandidates,{sourceType:"dm",sourceConversationId:conversation.id});
 
       if(result?.replyTiming&&enqueueDelayedDmResult(conversation,userMessage,result)){
         scheduleDmProactive(conversation.characterId,"normal");
@@ -3485,7 +3595,8 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
           addMessage(conversation.id,reply.speakerId,String(reply.message).trim(),{source:"group-ai-fallback",seenByUser:true});
         }
       }
-      mergeGroupMemoryCandidates(conversation.groupId,result.groupMemoryCandidates);
+      mergeGroupMemoryCandidates(conversation.groupId,result.groupMemoryCandidates,{sourceType:"group",sourceConversationId:conversation.id});
+      propagateGroupMemoryCandidatesToParticipants(groupById(conversation.groupId),result.groupMemoryCandidates);
       scheduleGroupProactive(conversation.groupId,"normal");
     }
   }catch(error){
@@ -3983,7 +4094,7 @@ function pushDiagnosticsText(data){
     const q=n.phase329ConversationQuality;
     lines.push(
       "",
-      "Phase 3.2.9 横断オンライン・自発話題新鮮度: 有効",
+      "Phase 3.2.10 会話横断記憶・未回収話題回収: 有効",
       `オンライン共有範囲: ${q.onlineScope==="character_wide_dm_and_group"?"DM↔グループでキャラ単位":"トーク単位"}`,
       `DM→グループ高速既読: ${q.dmToGroupFastRead?"有効":"無効"}`,
       `グループ→DM高速既読: ${q.groupToDmFastRead?"有効":"無効"}`,
@@ -4352,6 +4463,9 @@ async function pullPendingPushMessages(){
           source:"push-proactive",
           seenByUser:appState.activeConversationId===conversation.id&&!chatScreen.hidden&&document.visibilityState==="visible"
         });
+      }
+      if(conversation.type==="dm"&&event?.meta?.followUpMemoryKey&&characterById(event.speakerId)){
+        markFollowUpMemoryRecovered(event.speakerId,event.meta.followUpMemoryKey);
       }
       clearDelayedReplyByEventId(event.eventId);
       clearDelayedGroupReplyByEventId(event.eventId);
@@ -4787,6 +4901,10 @@ async function maybeSendDmProactive(characterId){
           seenByUser:show
         }
       );
+
+      if(result?.followUpMemoryKey){
+        markFollowUpMemoryRecovered(characterId,result.followUpMemoryKey);
+      }
 
       state.lastSentAt=Date.now();
       state.dailyCount+=1;
