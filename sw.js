@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-10a-slang-emoji-output-guard-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-11-proactive-character-image-message-v1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -15,6 +15,10 @@ const ASSETS = [
   "./assets/stickers/surprise.png",
   "./assets/stickers/sleepy.png",
   "./assets/stickers/wave.png",
+  "./assets/proactive/food-cocoa-bread.jpg",
+  "./assets/proactive/desk-game.jpg",
+  "./assets/proactive/sunset-after-rain.jpg",
+  "./assets/proactive/desk-snack-study.jpg",
 ];
 
 

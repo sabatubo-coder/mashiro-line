@@ -1441,10 +1441,18 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.10a-slang-emoji-output-guard-v1";
+const PUSH_VERSION = "phase3.2.11-proactive-character-image-message-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
+
+const PROACTIVE_IMAGE_ASSETS = {
+  food_cocoa_bread:{id:"food_cocoa_bread",src:"./assets/proactive/food-cocoa-bread.jpg",alt:"食べ物と飲み物の写真"},
+  desk_game:{id:"desk_game",src:"./assets/proactive/desk-game.jpg",alt:"机の上の身近な物の写真"},
+  sunset_after_rain:{id:"sunset_after_rain",src:"./assets/proactive/sunset-after-rain.jpg",alt:"雨上がりの夕焼けの写真"},
+  desk_snack_study:{id:"desk_snack_study",src:"./assets/proactive/desk-snack-study.jpg",alt:"机の上のノートや飲み物の写真"}
+};
+function proactiveImageAsset(id){return PROACTIVE_IMAGE_ASSETS[String(id||"").trim()]||null;}
 
 const STICKERS = {
   // smile / cheer IDs are retained so old Phase 3.2 messages remain readable.
@@ -1627,7 +1635,7 @@ function normalizeStickerId(value){const id=String(value||"").trim().toLowerCase
 function stickerToken(id){const value=normalizeStickerId(id);return value?`[[STAMP:${value}]]`:"";}
 function stickerIdFromText(value){const match=String(value||"").trim().match(/^\[\[STAMP:([a-z0-9_-]+)\]\]$/i);return normalizeStickerId(match?.[1]);}
 function messageTypeOf(message){
-  if(message?.messageType==="image")return "image";
+  if(message?.messageType==="image"||proactiveImageAsset(message?.imageAssetId))return "image";
   if(message?.messageType==="sticker"||normalizeStickerId(message?.stickerId)||stickerIdFromText(message?.text))return "sticker";
   return "text";
 }
@@ -1748,6 +1756,10 @@ function renderStickerPanel(){
 }
 
 async function hydrateMessageImage(container,message){
+  const builtIn=proactiveImageAsset(message?.imageAssetId);
+  if(builtIn){
+    const img=document.createElement("img");img.src=builtIn.src;img.alt=builtIn.alt||"送信された写真";img.loading="lazy";img.onload=()=>scheduleMessageScrollSettle();img.onerror=()=>{container.classList.add("media-image-missing");container.textContent="写真";};container.replaceChildren(img);return;
+  }
   try{
     const record=await getMediaRecord(message.mediaId);if(!record?.blob)throw new Error("missing");
     const img=document.createElement("img");const url=URL.createObjectURL(record.blob);img.src=url;img.alt="送信された写真";img.onload=()=>{setTimeout(()=>URL.revokeObjectURL(url),1500);scheduleMessageScrollSettle();};container.replaceChildren(img);
@@ -2827,6 +2839,7 @@ function addMessage(conversationId,senderId,text,options={}){
     messageType:options.messageType||((stickerIdFromText(text)||options.stickerId)?"sticker":"text"),
     stickerId:normalizeStickerId(options.stickerId)||stickerIdFromText(text)||"",
     mediaId:String(options.mediaId||""),
+    imageAssetId:String(options.imageAssetId||""),
     mediaMime:String(options.mediaMime||""),
     mediaWidth:Number(options.mediaWidth||0)||0,
     mediaHeight:Number(options.mediaHeight||0)||0,
@@ -3465,6 +3478,7 @@ function recentHistoryForAPI(conversationId){return loadConversationMessages(con
   createdAt:m.createdAt,
   messageType:messageTypeOf(m),
   stickerId:messageStickerId(m),
+  imageAssetId:String(m.imageAssetId||"").slice(0,80),
   mediaSummary:String(m.mediaSummary||"").slice(0,300)
 }));}
 
@@ -4094,13 +4108,27 @@ function pushDiagnosticsText(data){
     const q=n.phase329ConversationQuality;
     lines.push(
       "",
-      "Phase 3.2.10a スラング・絵文字・異常出力ガード: 有効",
+      "Phase 3.2.10a〜3.2.11 会話品質・表現制御: 有効",
       `オンライン共有範囲: ${q.onlineScope==="character_wide_dm_and_group"?"DM↔グループでキャラ単位":"トーク単位"}`,
       `DM→グループ高速既読: ${q.dmToGroupFastRead?"有効":"無効"}`,
       `グループ→DM高速既読: ${q.groupToDmFastRead?"有効":"無効"}`,
       `自発話題: 新規${q.proactiveContinuityWeights?.newTopic??68}% / 続き${q.proactiveContinuityWeights?.continueRecent??22}% / 少し前の記憶${q.proactiveContinuityWeights?.olderMemory??10}%`,
       `個別自発LINE意味重複ガード: ${q.proactiveSemanticRepeatGuard?"有効":"無効"}`,
       `意味重複の参照期間: 最大${q.proactiveRepeatWindowDays??7}日`
+    );
+  }
+
+  if(n.phase3211ProactiveImages){
+    const i=n.phase3211ProactiveImages;
+    lines.push(
+      "",
+      "Phase 3.2.11 キャラクター自発画像メッセージ: 有効",
+      `DM画像形式: 写真単体 / 写真＋添え文 / 短文→写真`,
+      `画像候補率: 約${i.imageChancePercent??14}%（自然さ判定で送らない場合あり）`,
+      `画像の最短間隔: ${i.minimumIntervalHours??18}時間`,
+      `同一素材の再利用抑制: ${i.sameAssetRepeatWindowHours??72}時間`,
+      `内蔵写真素材: ${i.assetCount??4}種類`,
+      `キャラ別写真ジャンル制限: ${i.characterScopedSubjects?"有効":"無効"}`
     );
   }
 
@@ -4452,15 +4480,21 @@ async function pullPendingPushMessages(){
 
     for(const event of events){
       const conversation=conversationById(event?.conversationId);
-      if(!conversation||!event?.eventId||!String(event?.message||"").trim())continue;
+      const imageAssetId=String(event?.meta?.imageAssetId||"").trim();
+      const isImage=event?.meta?.messageType==="image"&&Boolean(proactiveImageAsset(imageAssetId));
+      const messageText=String(event?.message||"").trim();
+      if(!conversation||!event?.eventId||(!messageText&&!isImage))continue;
       const messageId=`push-${event.eventId}`;
       const existing=loadConversationMessages(conversation.id).some(m=>m.id===messageId||m.pushEventId===event.eventId);
       if(!existing){
-        addMessage(conversation.id,event.speakerId,String(event.message).trim(),{
+        addMessage(conversation.id,event.speakerId,messageText,{
           id:messageId,
           pushEventId:event.eventId,
           createdAt:event.createdAt||new Date().toISOString(),
           source:"push-proactive",
+          messageType:isImage?"image":"text",
+          imageAssetId:isImage?imageAssetId:"",
+          mediaSummary:isImage?String(event?.meta?.mediaSummary||"").slice(0,300):"",
           seenByUser:appState.activeConversationId===conversation.id&&!chatScreen.hidden&&document.visibilityState==="visible"
         });
       }
