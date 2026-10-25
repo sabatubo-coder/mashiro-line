@@ -1441,7 +1441,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.6-scroll-stability-unread-badge-v1";
+const PUSH_VERSION = "phase3.2.7-badge-sync-semantic-duplicate-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -3905,6 +3905,20 @@ function pushDiagnosticsText(data){
     );
   }
 
+  if(n.phase327Quality){
+    const q=n.phase327Quality;
+    lines.push(
+      "",
+      "Phase 3.2.7 バッジ同期・意味重複ガード: 有効",
+      `未読バッジ基準: ${q.unreadBadgeTruth||"due_unseen_push_events"}`,
+      `古いPushのバッジ巻き戻し防止: ${q.badgeRevisionGuard?"有効":"無効"}`,
+      `同一キャラ意味重複ガード: ${q.groupSemanticDuplicateGuard?"有効":"無効"}`,
+      `同一キャラ比較: 直近${q.sameCharacterRecentMessages??8}発言`,
+      `グループ比較: 直近${q.groupRecentMessages??15}発言`,
+      `重複時: 最大${q.duplicateRetryCount??2}回再生成 → 残る場合は発言省略`
+    );
+  }
+
   if(n.phase325Consistency){
     const c=n.phase325Consistency;
     lines.push(
@@ -4142,16 +4156,26 @@ async function syncPushSnapshotNow(){
   const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
   if(!apiEndpoint||!accessCode)return;
   try{
-    await fetchJsonWithRetry(endpointFor(apiEndpoint,"pushSync"),{
-      method:"POST",
-      headers:pushAuthHeaders(accessCode),
-      body:JSON.stringify({
-        deviceId:getPushDeviceId(),
-        timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
-        settings:getPushSettings(),
-        snapshot:buildPushSnapshot()
-      })
-    },0);
+    const result=await fetchJsonWithRetry(
+      endpointFor(apiEndpoint,"pushSync"),
+      {
+        method:"POST",
+        headers:pushAuthHeaders(accessCode),
+        body:JSON.stringify({
+          deviceId:getPushDeviceId(),
+          timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+          settings:getPushSettings(),
+          snapshot:buildPushSnapshot()
+        })
+      },
+      0
+    );
+    if(Number.isFinite(Number(result?.badgeCount))){
+      applyServerBadgeState(
+        result.badgeCount,
+        result?.badgeRevision
+      );
+    }
   }catch(error){
     if(error?.message==="Push device not registered"){
       try{
@@ -4247,6 +4271,12 @@ async function flushSeenPushEvents(){
     const seenIds=Array.isArray(result?.eventIds)?result.eventIds:ids;
     const seenSet=new Set(seenIds.map(String));
     savePushSeenQueue(loadPushSeenQueue().filter(id=>!seenSet.has(id)));
+    if(Number.isFinite(Number(result?.badgeCount))){
+      applyServerBadgeState(
+        result.badgeCount,
+        result?.badgeRevision
+      );
+    }
   }catch{}
   finally{appState.pushSeenSyncBusy=false;}
 }
@@ -4257,6 +4287,36 @@ function localUnreadCount(){
     count+=loadConversationMessages(conversation.id).filter(m=>m.senderId!=="mashiro"&&!m.seenByUser).length;
   }
   return count;
+}
+
+
+async function notifyServiceWorkerBadgeState(badgeCount,badgeRevision){
+  try{
+    const registration=await navigator.serviceWorker?.ready;
+    const worker=
+      registration?.active||
+      registration?.waiting||
+      registration?.installing;
+    if(worker){
+      worker.postMessage({
+        type:"badge-state-sync",
+        badgeCount:Math.max(0,Number(badgeCount||0)),
+        badgeRevision:Math.max(0,Number(badgeRevision||0))
+      });
+    }
+  }catch{}
+}
+
+function applyServerBadgeState(badgeCount,badgeRevision){
+  const count=Math.max(0,Number(badgeCount||0));
+  try{
+    if(count>0&&"setAppBadge" in navigator){
+      navigator.setAppBadge(count);
+    }else if("clearAppBadge" in navigator){
+      navigator.clearAppBadge();
+    }
+  }catch{}
+  notifyServiceWorkerBadgeState(count,badgeRevision);
 }
 
 function updateAppBadgeFromLocal(){

@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-6-scroll-unread-badge-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-7-badge-sync-semantic-duplicate-v1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -16,6 +16,70 @@ const ASSETS = [
   "./assets/stickers/sleepy.png",
   "./assets/stickers/wave.png",
 ];
+
+
+const BADGE_STATE_CACHE_KEY = "./__mashiroline_badge_state__";
+
+async function loadBadgeState(){
+  try{
+    const cache=await caches.open(CACHE_NAME);
+    const response=await cache.match(BADGE_STATE_CACHE_KEY);
+    if(!response)return {revision:0,count:0};
+    const data=await response.json();
+    return {
+      revision:Math.max(0,Number(data?.revision||0)),
+      count:Math.max(0,Number(data?.count||0))
+    };
+  }catch{
+    return {revision:0,count:0};
+  }
+}
+
+async function saveBadgeState(revision,count){
+  try{
+    const cache=await caches.open(CACHE_NAME);
+    await cache.put(
+      BADGE_STATE_CACHE_KEY,
+      new Response(
+        JSON.stringify({
+          revision:Math.max(0,Number(revision||0)),
+          count:Math.max(0,Number(count||0))
+        }),
+        {headers:{"Content-Type":"application/json"}}
+      )
+    );
+  }catch{}
+}
+
+async function applyRevisionedBadge(data){
+  const count=Math.max(0,Number(data?.badgeCount||0));
+  const revision=Math.max(0,Number(data?.badgeRevision||0));
+  const previous=await loadBadgeState();
+
+  if(revision>0&&previous.revision>0&&revision<previous.revision){
+    return;
+  }
+
+  const workerNavigator=
+    typeof navigator!=="undefined"?navigator:self.navigator;
+
+  if(workerNavigator){
+    if(count>0&&"setAppBadge" in workerNavigator){
+      await Promise.resolve(
+        workerNavigator.setAppBadge(count)
+      ).catch(()=>{});
+    }else if(count===0&&"clearAppBadge" in workerNavigator){
+      await Promise.resolve(
+        workerNavigator.clearAppBadge()
+      ).catch(()=>{});
+    }
+  }
+
+  await saveBadgeState(
+    revision>0?revision:previous.revision,
+    count
+  );
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
@@ -63,18 +127,33 @@ self.addEventListener("push", (event) => {
     }
   };
 
-  const promises = [self.registration.showNotification(title, options)];
-  const badgeCount = Math.max(0, Number(data.badgeCount || 0));
-  const workerNavigator = typeof navigator !== "undefined" ? navigator : self.navigator;
-  if (workerNavigator) {
-    if (badgeCount > 0 && "setAppBadge" in workerNavigator) {
-      promises.push(Promise.resolve(workerNavigator.setAppBadge(badgeCount)).catch(() => {}));
-    } else if (badgeCount === 0 && "clearAppBadge" in workerNavigator) {
-      promises.push(Promise.resolve(workerNavigator.clearAppBadge()).catch(() => {}));
-    }
-  }
+  const promises = [
+    self.registration.showNotification(title, options),
+    applyRevisionedBadge(data)
+  ];
 
   event.waitUntil(Promise.all(promises));
+});
+
+
+self.addEventListener("message",(event)=>{
+  const data=event?.data||{};
+  if(data.type!=="badge-state-sync")return;
+
+  event.waitUntil((async()=>{
+    const revision=Math.max(0,Number(data.badgeRevision||0));
+    const count=Math.max(0,Number(data.badgeCount||0));
+    const previous=await loadBadgeState();
+
+    if(revision>0&&previous.revision>0&&revision<previous.revision){
+      return;
+    }
+
+    await saveBadgeState(
+      revision>0?revision:previous.revision,
+      count
+    );
+  })());
 });
 
 self.addEventListener("notificationclick", (event) => {
