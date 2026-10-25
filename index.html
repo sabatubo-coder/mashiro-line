@@ -421,6 +421,57 @@ button { -webkit-tap-highlight-color: transparent; }
   gap: 5px;
 }
 
+/* Phase 3.2.14: quoted replies and message reactions. */
+.reply-quote {
+  width: min(100%, 360px);
+  margin-bottom: 5px;
+  padding: 6px 9px 6px 10px;
+  border-left: 3px solid rgba(67,126,84,.55);
+  border-radius: 8px;
+  background: rgba(255,255,255,.58);
+  color: #62666d;
+  font-size: 11px;
+  line-height: 1.3;
+  overflow: hidden;
+}
+.outgoing .reply-quote { background: rgba(255,255,255,.42); }
+.reply-quote-sender {
+  margin-bottom: 2px;
+  color: #397049;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.reply-quote-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: -1px;
+  margin-bottom: 1px;
+}
+.outgoing .message-reactions { justify-content: flex-end; }
+.incoming .message-reactions { justify-content: flex-start; }
+.message-reaction-chip {
+  min-width: 27px;
+  height: 24px;
+  padding: 1px 7px;
+  border: 1px solid rgba(60,60,67,.13);
+  border-radius: 999px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 1px 2px rgba(0,0,0,.07);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 15px;
+  line-height: 1;
+}
+.message-reaction-count { color: #6f747a; font-size: 9px; }
+
 .typing-row {
   min-height: 46px;
   display: none;
@@ -1502,7 +1553,8 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.13-proactive-sticker-reaction-v1";
+const PUSH_VERSION = "phase3.2.14-message-reaction-quote-reply-v1";
+const MESSAGE_REACTION_EMOJIS = Object.freeze(["👍","😂","😊","😮","🙏","👏"]);
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -1709,6 +1761,58 @@ const confirmReset = document.getElementById("confirmReset");
 function normalizeStickerId(value){const id=String(value||"").trim().toLowerCase();return STICKERS[id]?id:"";}
 function stickerToken(id){const value=normalizeStickerId(id);return value?`[[STAMP:${value}]]`:"";}
 function stickerIdFromText(value){const match=String(value||"").trim().match(/^\[\[STAMP:([a-z0-9_-]+)\]\]$/i);return normalizeStickerId(match?.[1]);}
+function normalizeReactionEmoji(value){const emoji=String(value||"").trim();return MESSAGE_REACTION_EMOJIS.includes(emoji)?emoji:"";}
+function normalizeMessageReactions(raw){
+  if(!Array.isArray(raw))return[];
+  const byReactor=new Map();
+  for(const item of raw){
+    const emoji=normalizeReactionEmoji(item?.emoji);
+    const reactorId=String(item?.reactorId||"").trim();
+    if(!emoji||!reactorId)continue;
+    byReactor.set(reactorId,{reactorId,emoji,createdAt:String(item?.createdAt||"")});
+  }
+  return [...byReactor.values()].slice(-8);
+}
+function messagePreviewText(message){
+  const type=messageTypeOf(message);
+  if(type==="image")return String(message?.text||"").trim()||"写真";
+  if(type==="sticker")return `スタンプ「${STICKERS[messageStickerId(message)]?.label||"スタンプ"}」`;
+  return String(message?.text||"").replace(/\s+/g," ").trim().slice(0,80);
+}
+function addReactionToMessage(conversationId,targetMessageId,reactorId,emoji,createdAt=""){
+  const normalizedEmoji=normalizeReactionEmoji(emoji);
+  if(!conversationId||!targetMessageId||!reactorId||!normalizedEmoji)return false;
+  const messages=loadConversationMessages(conversationId);
+  const target=messages.find(message=>String(message?.id||"")===String(targetMessageId));
+  if(!target)return false;
+  const reactions=normalizeMessageReactions(target.reactions);
+  const next=reactions.filter(item=>item.reactorId!==reactorId);
+  next.push({reactorId,emoji:normalizedEmoji,createdAt:createdAt||new Date().toISOString()});
+  target.reactions=next;
+  saveConversationMessages(conversationId,messages);
+  const visible=isConversationActuallyVisible(conversationId);
+  if(visible)renderMessages({scrollMode:messageListNearBottom()?"bottom":"preserve"});
+  renderTalkList();
+  return true;
+}
+function replyQuoteOptions(conversationId,replyTo){
+  const id=String(replyTo?.messageId||replyTo?.id||"").trim();
+  if(!id)return{};
+  const target=loadConversationMessages(conversationId).find(message=>String(message?.id||"")===id);
+  return {
+    replyToId:id,
+    replyToSenderId:String(replyTo?.senderId||target?.senderId||""),
+    replyToText:String(replyTo?.excerpt||messagePreviewText(target)||"").slice(0,120)
+  };
+}
+function applyBackendReaction(conversation,result,fallbackTargetMessageId=""){
+  const reaction=result?.reaction;
+  const emoji=normalizeReactionEmoji(reaction?.emoji);
+  if(!emoji)return false;
+  const targetMessageId=String(reaction?.targetMessageId||fallbackTargetMessageId||"").trim();
+  const reactorId=String(reaction?.reactorId||conversation?.characterId||"").trim();
+  return addReactionToMessage(conversation.id,targetMessageId,reactorId,emoji,reaction?.createdAt||"");
+}
 function messageTypeOf(message){
   if(message?.messageType==="image"||proactiveImageAsset(message?.imageAssetId))return "image";
   if(message?.messageType==="sticker"||normalizeStickerId(message?.stickerId)||stickerIdFromText(message?.text))return "sticker";
@@ -2856,6 +2960,29 @@ function renderMessages(options={}){
     }else{
       contentNode=document.createElement("div");contentNode.className="bubble";contentNode.textContent=message.text;
     }
+    if(message.replyToId||message.replyToText){
+      const target=messages.find(candidate=>String(candidate?.id||"")===String(message.replyToId||""));
+      const quote=document.createElement("div");quote.className="reply-quote";
+      const quoteSender=document.createElement("div");quoteSender.className="reply-quote-sender";
+      quoteSender.textContent=senderDisplayName(message.replyToSenderId||target?.senderId||"")||"メッセージ";
+      const quoteText=document.createElement("div");quoteText.className="reply-quote-text";
+      quoteText.textContent=String(message.replyToText||messagePreviewText(target)||"メッセージ");
+      quote.append(quoteSender,quoteText);stack.appendChild(quote);
+    }
+    const reactions=normalizeMessageReactions(message.reactions);
+    let reactionsNode=null;
+    if(reactions.length){
+      reactionsNode=document.createElement("div");reactionsNode.className="message-reactions";
+      const grouped=new Map();
+      for(const reaction of reactions){
+        const item=grouped.get(reaction.emoji)||{emoji:reaction.emoji,reactors:[]};item.reactors.push(reaction.reactorId);grouped.set(reaction.emoji,item);
+      }
+      for(const item of grouped.values()){
+        const chip=document.createElement("span");chip.className="message-reaction-chip";chip.textContent=item.emoji;chip.title=item.reactors.map(senderDisplayName).join("、");
+        if(item.reactors.length>1){const count=document.createElement("span");count.className="message-reaction-count";count.textContent=String(item.reactors.length);chip.appendChild(count);}
+        reactionsNode.appendChild(chip);
+      }
+    }
     const meta=document.createElement("div");meta.className="message-meta";
     if(outgoing){
       if(conversation.type==="group"){
@@ -2871,7 +2998,7 @@ function renderMessages(options={}){
         meta.appendChild(read);
       }
     }
-    const clock=document.createElement("span");clock.textContent=formatClock(message.createdAt);meta.appendChild(clock);stack.append(contentNode,meta);row.appendChild(stack);messageList.appendChild(row);
+    const clock=document.createElement("span");clock.textContent=formatClock(message.createdAt);meta.appendChild(clock);stack.appendChild(contentNode);if(reactionsNode)stack.appendChild(reactionsNode);stack.appendChild(meta);row.appendChild(stack);messageList.appendChild(row);
   }
   restoreMessageScrollState(scrollState,{forceBottom:scrollMode==="bottom",settle:options?.settle!==false});
 }
@@ -3060,6 +3187,10 @@ function addMessage(conversationId,senderId,text,options={}){
     mediaWidth:Number(options.mediaWidth||0)||0,
     mediaHeight:Number(options.mediaHeight||0)||0,
     mediaSummary:String(options.mediaSummary||"").slice(0,300),
+    replyToId:String(options.replyToId||"").trim(),
+    replyToSenderId:String(options.replyToSenderId||"").trim(),
+    replyToText:String(options.replyToText||"").slice(0,120),
+    reactions:normalizeMessageReactions(options.reactions),
     createdAt:options.createdAt||new Date().toISOString(),
     readByCharacter:senderId==="mashiro"?Boolean(options.readByCharacter):true,
     readByCharacters:
@@ -3326,7 +3457,10 @@ async function processDelayedDmState(){
         message.id===item.localMessageId
       );
 
-    if(!existing&&String(item.reply||"").trim()){
+    if(item.reaction?.emoji){
+      addReactionToMessage(item.conversationId,item.reaction.targetMessageId,item.characterId,item.reaction.emoji,item.replyAt);
+    }
+    if(!existing&&!item.reactionOnly&&String(item.reply||"").trim()){
       addMessage(
         item.conversationId,
         item.characterId,
@@ -3339,7 +3473,8 @@ async function processDelayedDmState(){
           seenByUser:
             appState.activeConversationId===item.conversationId&&
             !chatScreen.hidden&&
-            document.visibilityState==="visible"
+            document.visibilityState==="visible",
+          ...replyQuoteOptions(item.conversationId,item.replyTo)
         }
       );
     }
@@ -3355,7 +3490,8 @@ async function processDelayedDmState(){
 
 function enqueueDelayedDmResult(conversation,userMessage,result){
   const timing=result?.replyTiming;
-  if(!timing?.readAt||!timing?.replyAt||!String(result?.reply||"").trim())return false;
+  const hasReaction=Boolean(normalizeReactionEmoji(result?.reaction?.emoji));
+  if(!timing?.readAt||!timing?.replyAt||(!String(result?.reply||"").trim()&&!hasReaction))return false;
 
   const state=loadDelayedDmState();
   const token=`${conversation.id}-${userMessage.id}`;
@@ -3374,7 +3510,10 @@ function enqueueDelayedDmResult(conversation,userMessage,result){
     token,
     conversationId:conversation.id,
     characterId:conversation.characterId,
-    reply:String(result.reply).trim(),
+    reply:String(result.reply||"").trim(),
+    reaction:hasReaction?{emoji:normalizeReactionEmoji(result.reaction.emoji),targetMessageId:String(result.reaction.targetMessageId||userMessage.id)}:null,
+    reactionOnly:result?.reactionOnly===true,
+    replyTo:result?.replyTo||null,
     replyAt:timing.replyAt,
     eventId,
     localMessageId:eventId?`push-${eventId}`:`delayed-${token}`
@@ -3524,6 +3663,9 @@ async function processDelayedGroupState(){
         message.id===item.localMessageId
       );
 
+    if(item.reaction?.emoji){
+      addReactionToMessage(item.conversationId,item.reaction.targetMessageId,item.characterId,item.reaction.emoji,item.replyAt);
+    }
     if(!existing&&String(item.reply||"").trim()){
       const visible=
         appState.activeConversationId===item.conversationId&&
@@ -3547,7 +3689,8 @@ async function processDelayedGroupState(){
           source:item.eventId
             ?"scheduled-group-reply-local"
             :"delayed-group-reply-local",
-          seenByUser:visible
+          seenByUser:visible,
+          ...replyQuoteOptions(item.conversationId,item.replyTo)
         }
       );
     }
@@ -3618,6 +3761,8 @@ function enqueueDelayedGroupResult(conversation,userMessage,result){
       characterId:reply.speakerId,
       throughCreatedAt:userMessage.createdAt,
       reply:String(reply.message).trim(),
+      reaction:normalizeReactionEmoji(reply?.reaction?.emoji)?{emoji:normalizeReactionEmoji(reply.reaction.emoji),targetMessageId:String(reply.reaction.targetMessageId||userMessage.id)}:null,
+      replyTo:reply?.replyTo||null,
       readAt:timing.readAt||"",
       replyAt:timing.replyAt,
       eventId,
@@ -3690,13 +3835,16 @@ function endpointFor(apiEndpoint,kind){
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
 async function warmBackend(apiEndpoint){const health=endpointFor(apiEndpoint,"health");const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),10000);try{await fetch(health,{method:"GET",cache:"no-store",signal:controller.signal});}catch{}finally{clearTimeout(timeout);}}
 function recentHistoryForAPI(conversationId){return loadConversationMessages(conversationId).slice(-40).map(m=>({
+  id:String(m.id||""),
   senderId:m.senderId,
   text:m.text,
   createdAt:m.createdAt,
   messageType:messageTypeOf(m),
   stickerId:messageStickerId(m),
   imageAssetId:String(m.imageAssetId||"").slice(0,80),
-  mediaSummary:String(m.mediaSummary||"").slice(0,300)
+  mediaSummary:String(m.mediaSummary||"").slice(0,300),
+  replyToId:String(m.replyToId||""),
+  reactions:normalizeMessageReactions(m.reactions)
 }));}
 
 async function recentHistoryWithLatestImageForAPI(conversationId){
@@ -3715,7 +3863,7 @@ async function recentHistoryWithLatestImageForAPI(conversationId){
 
 async function fetchJsonWithRetry(endpoint,options,retries=1){let lastError;for(let attempt=0;attempt<=retries;attempt++){const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),60000);try{const response=await fetch(endpoint,{...options,signal:controller.signal,cache:"no-store"});const data=await response.json().catch(()=>({}));if(response.status===401){localStorage.removeItem(ACCESS_CODE_KEY);throw Object.assign(new Error("invalid_app_code"),{code:"invalid_app_code"});}if(!response.ok){const e=Object.assign(new Error(String(data?.error||`http_${response.status}`)),{code:[429,500,502,503,504].includes(response.status)?"temporary_error":response.status===403?"origin_not_allowed":"api_error"});throw e;}return data;}catch(error){lastError=error;const retryable=error?.name==="AbortError"||error instanceof TypeError||error?.code==="temporary_error";if(!retryable||attempt===retries)throw error;await sleep(1800);}finally{clearTimeout(timeout);}}throw lastError;}
 
-async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);const messages=await recentHistoryWithLatestImageForAPI(conversation.id);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages,memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,characterActivityAt:characterActivityAtForAPI(),deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true})});}
+async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);const messages=await recentHistoryWithLatestImageForAPI(conversation.id);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages,memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,characterActivityAt:characterActivityAtForAPI(),deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true,clientVersion:PUSH_VERSION})});}
 function privateMemoriesForGroup(group){const map={};for(const id of group.participants){if(id!=="mashiro"&&characterById(id))map[id]=memoriesForAPI(id);}return map;}
 async function callGroupChat(conversation,accessCode,apiEndpoint){
   const group=groupById(conversation.groupId);
@@ -3740,7 +3888,8 @@ async function callGroupChat(conversation,accessCode,apiEndpoint){
         timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
         characterActivityAt:characterActivityAtForAPI(),
         deviceId:pushNotificationsEnabled()?getPushDeviceId():"",
-        scheduleDelayedReply:true
+        scheduleDelayedReply:true,
+        clientVersion:PUSH_VERSION
       })
     }
   );
@@ -3805,8 +3954,12 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
       if(result?.replyTiming&&enqueueDelayedDmResult(conversation,userMessage,result)){
         scheduleDmProactive(conversation.characterId,"normal");
       }else{
-        await sleep(350);markOutgoingReadThrough(conversation.id,userMessage.createdAt);setTyping(true);await sleep(650);setTyping(false);
-        addMessage(conversation.id,conversation.characterId,String(result.reply||"").trim(),{source:"ai",seenByUser:true});
+        await sleep(350);markOutgoingReadThrough(conversation.id,userMessage.createdAt);
+        applyBackendReaction(conversation,result,userMessage.id);
+        if(!result?.reactionOnly&&String(result?.reply||"").trim()){
+          setTyping(true);await sleep(650);setTyping(false);
+          addMessage(conversation.id,conversation.characterId,String(result.reply||"").trim(),{source:"ai",seenByUser:true,...replyQuoteOptions(conversation.id,result?.replyTo)});
+        }
         scheduleDmProactive(conversation.characterId,"normal");
       }
     }else{
@@ -3822,8 +3975,9 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
         const replies=Array.isArray(result.replies)?result.replies.slice(0,36):[];setTyping(false);
         for(const reply of replies){
           if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
+          if(normalizeReactionEmoji(reply?.reaction?.emoji)){addReactionToMessage(conversation.id,String(reply.reaction.targetMessageId||userMessage.id),reply.speakerId,reply.reaction.emoji);}
           setTyping(true,reply.speakerId);await sleep(550+Math.min(850,String(reply.message).length*12));setTyping(false);
-          addMessage(conversation.id,reply.speakerId,String(reply.message).trim(),{source:"group-ai-fallback",seenByUser:true});
+          addMessage(conversation.id,reply.speakerId,String(reply.message).trim(),{source:"group-ai-fallback",seenByUser:true,...replyQuoteOptions(conversation.id,reply?.replyTo)});
         }
       }
       mergeGroupMemoryCandidates(conversation.groupId,result.groupMemoryCandidates,{sourceType:"group",sourceConversationId:conversation.id});
@@ -4705,11 +4859,16 @@ async function pullPendingPushMessages(){
       const isImage=event?.meta?.messageType==="image"&&Boolean(proactiveImageAsset(imageAssetId));
       const pushStickerId=normalizeStickerId(event?.meta?.stickerId)||stickerIdFromText(event?.message);
       const isSticker=event?.meta?.messageType==="sticker"&&Boolean(pushStickerId);
+      const reactionEmoji=normalizeReactionEmoji(event?.meta?.reactionEmoji);
+      const isReaction=event?.meta?.messageType==="reaction"||Boolean(reactionEmoji);
       const messageText=String(event?.message||"").trim();
-      if(!conversation||!event?.eventId||(!messageText&&!isImage&&!isSticker))continue;
+      if(!conversation||!event?.eventId||(!messageText&&!isImage&&!isSticker&&!isReaction))continue;
       const messageId=`push-${event.eventId}`;
       const existing=loadConversationMessages(conversation.id).some(m=>m.id===messageId||m.pushEventId===event.eventId);
-      if(!existing){
+      if(isReaction&&reactionEmoji){
+        addReactionToMessage(conversation.id,String(event?.meta?.reactionTargetMessageId||""),event.speakerId,reactionEmoji,event.createdAt||"");
+      }
+      if(!existing&&event?.meta?.messageType!=="reaction"&&(messageText||isImage||isSticker)){
         addMessage(conversation.id,event.speakerId,messageText,{
           id:messageId,
           pushEventId:event.eventId,
@@ -4719,7 +4878,8 @@ async function pullPendingPushMessages(){
           stickerId:isSticker?pushStickerId:"",
           imageAssetId:isImage?imageAssetId:"",
           mediaSummary:isImage?String(event?.meta?.mediaSummary||"").slice(0,300):"",
-          seenByUser:appState.activeConversationId===conversation.id&&!chatScreen.hidden&&document.visibilityState==="visible"
+          seenByUser:appState.activeConversationId===conversation.id&&!chatScreen.hidden&&document.visibilityState==="visible",
+          ...replyQuoteOptions(conversation.id,{messageId:event?.meta?.replyToMessageId,senderId:event?.meta?.replyToSenderId,excerpt:event?.meta?.replyToText})
         });
       }
       if(conversation.type==="dm"&&event?.meta?.followUpMemoryKey&&characterById(event.speakerId)){
