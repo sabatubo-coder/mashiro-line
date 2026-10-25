@@ -1416,7 +1416,7 @@ const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
-const PUSH_VERSION = "phase3.2.3-group-rally-momentum-one-message-one-push-v1";
+const PUSH_VERSION = "phase3.2.4-realtime-rally-fast-read-reply-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -2568,6 +2568,85 @@ function markOutgoingReadThrough(conversationId,throughCreatedAt,readAtOverride=
   }
 }
 
+const LOCAL_ACTIVE_SESSION_WINDOWS_MS={
+  natsuki:6*60*1000,
+  shiki:5*60*1000,
+  ichi:5*60*1000,
+  bunji:5*60*1000,
+  sosuke:4*60*1000
+};
+const LOCAL_ACTIVE_READ_RANGES_SECONDS={
+  natsuki:[1,4],
+  shiki:[1,6],
+  ichi:[1,5],
+  bunji:[2,7],
+  sosuke:[2,9]
+};
+
+function localDmActiveSessionPreview(conversation,userMessage){
+  if(
+    !conversation ||
+    conversation.type!=="dm" ||
+    !userMessage ||
+    statusText.textContent.trim()!=="オンライン"
+  )return null;
+
+  const messages=loadConversationMessages(conversation.id);
+  const index=messages.findIndex(message=>message.id===userMessage.id);
+  if(index<=0)return null;
+
+  const previous=messages[index-1];
+  if(previous?.senderId!==conversation.characterId)return null;
+
+  const previousAt=Date.parse(previous.createdAt||"");
+  const userAt=Date.parse(userMessage.createdAt||"");
+  const windowMs=LOCAL_ACTIVE_SESSION_WINDOWS_MS[conversation.characterId]||0;
+
+  if(
+    !Number.isFinite(previousAt) ||
+    !Number.isFinite(userAt) ||
+    windowMs<=0 ||
+    Math.max(0,userAt-previousAt)>windowMs
+  )return null;
+
+  return {
+    active:true,
+    characterId:conversation.characterId,
+    previousAt,
+    userAt,
+    windowMs
+  };
+}
+
+function scheduleOptimisticDmRead(conversation,userMessage){
+  const session=localDmActiveSessionPreview(conversation,userMessage);
+  if(!session)return null;
+
+  const range=
+    LOCAL_ACTIVE_READ_RANGES_SECONDS[conversation.characterId]||
+    [1,8];
+  const delayMs=Math.round(
+    (range[0]+Math.random()*(range[1]-range[0]))*1000
+  );
+
+  setTimeout(()=>{
+    const current=loadConversationMessages(conversation.id)
+      .find(message=>message.id===userMessage.id);
+    if(!current||current.readByCharacter)return;
+
+    markOutgoingReadThrough(
+      conversation.id,
+      userMessage.createdAt,
+      new Date().toISOString()
+    );
+  },delayMs);
+
+  return {
+    ...session,
+    optimisticReadDelayMs:delayMs
+  };
+}
+
 function loadDelayedDmState(){
   try{
     const raw=localStorage.getItem(DELAYED_DM_STATE_KEY);
@@ -2903,7 +2982,7 @@ async function processDelayedGroupState(){
 
 function enqueueDelayedGroupResult(conversation,userMessage,result){
   const groupTiming=result?.groupTiming;
-  const replies=Array.isArray(result?.replies)?result.replies.slice(0,15):[];
+  const replies=Array.isArray(result?.replies)?result.replies.slice(0,36):[];
 
   if(
     !groupTiming?.enabled ||
@@ -3120,6 +3199,12 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
 
   messageInput.value="";clearPendingImage();closeStickerPanel();autosizeInput();appState.isReplying=true;sendButton.disabled=true;
 
+  // Phase 3.2.4: オンライン中の会話ラリーでは、
+  // AI生成完了を待たずPWA側で数秒後に既読を付ける。
+  if(conversation.type==="dm"){
+    scheduleOptimisticDmRead(conversation,userMessage);
+  }
+
   const apiEndpoint=getApiEndpoint();
   if(!apiEndpoint){appState.isReplying=false;autosizeInput();showToast("AIバックエンドURLが設定されていません");return;}
   let accessCode=getAccessCode();if(!accessCode)accessCode=await askForAccessCode();
@@ -3149,7 +3234,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
         // 既読・返信は各キャラの生活モデル時刻に従う。
       }else{
         await sleep(350);markOutgoingRead(conversation.id);setTyping(true);
-        const replies=Array.isArray(result.replies)?result.replies.slice(0,15):[];setTyping(false);
+        const replies=Array.isArray(result.replies)?result.replies.slice(0,36):[];setTyping(false);
         for(const reply of replies){
           if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
           setTyping(true,reply.speakerId);await sleep(550+Math.min(850,String(reply.message).length*12));setTyping(false);
@@ -3619,8 +3704,8 @@ function pushDiagnosticsText(data){
     lines.push(
       "",
       "グループ会話ラリー・盛り上がり継続: 有効",
-      `1話題の最大メッセージ数: ${r.maxMessages??15}通`,
-      "盛り上がり目安: 低2〜4 / 普通4〜7 / 高7〜11 / 非常に高11〜15通",
+      `1話題の最大メッセージ数: ${r.maxMessages??36}通`,
+      `盛り上がり目安: 低${r.ranges?.low?.min??2}〜${r.ranges?.low?.max??4} / 普通${r.ranges?.normal?.min??4}〜${r.ranges?.normal?.max??8} / 高${r.ranges?.high?.min??8}〜${r.ranges?.high?.max??18} / 非常に高${r.ranges?.very_high?.min??18}〜${r.ranges?.very_high?.max??36}通`,
       `途中参加: ${r.interruptible?"ましろ発言で旧予約をキャンセルし再構成":"無効"}`,
       `通知方針: ${r.notificationPolicy||"1メッセージ=1 Push"}`,
       `自然終了: ${r.stallGuard||"相づちだけなら終了"}`
@@ -3651,6 +3736,9 @@ function pushDiagnosticsText(data){
       `ラリー判定の目安: 直前返信から約${activeProfile.onlineWindowMinutes??"-"}分以内`,
       `ラリー中の既読目安: ${readRange}`,
       `既読後の返信目安: ${replyRange}`,
+      `時刻基準: ${activeProfile.timingAnchor||"ましろの送信時刻"}`,
+      `送信者判定修正: ${activeProfile.senderIdentityPreserved?"有効":"未確認"}`,
+      `表示中の先行既読: ${activeProfile.clientOptimisticRead?"有効":"無効"}`,
       "画像は内容を見る時間を少し追加 / スタンプは軽めに反応"
     );
   }

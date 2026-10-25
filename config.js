@@ -1,2 +1,2 @@
-// ましろLINE Phase 3.2.3 完成版 1メッセージ=1通知
+// ましろLINE Phase 3.2.4 リアルタイム会話ラリー・即時既読返信 Ver.1
 window.MASHIROLINE_API_ENDPOINT = "https://mashiro-line-backend-importzip--misomimizu.replit.app/api/chat";
