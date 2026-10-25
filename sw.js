@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-10-cross-channel-memory-followup-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-10a-slang-emoji-output-guard-v1";
 const ASSETS = [
   "./",
   "./index.html",

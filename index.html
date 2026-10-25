@@ -1441,7 +1441,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.10-cross-channel-memory-followup-v1";
+const PUSH_VERSION = "phase3.2.10a-slang-emoji-output-guard-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -4094,7 +4094,7 @@ function pushDiagnosticsText(data){
     const q=n.phase329ConversationQuality;
     lines.push(
       "",
-      "Phase 3.2.10 会話横断記憶・未回収話題回収: 有効",
+      "Phase 3.2.10a スラング・絵文字・異常出力ガード: 有効",
       `オンライン共有範囲: ${q.onlineScope==="character_wide_dm_and_group"?"DM↔グループでキャラ単位":"トーク単位"}`,
       `DM→グループ高速既読: ${q.dmToGroupFastRead?"有効":"無効"}`,
       `グループ→DM高速既読: ${q.groupToDmFastRead?"有効":"無効"}`,
