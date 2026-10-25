@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-13-prep-sticker-set-expansion-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-13-prep-b-illustrated-stickers-v1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -15,6 +15,16 @@ const ASSETS = [
   "./assets/stickers/surprise.png",
   "./assets/stickers/sleepy.png",
   "./assets/stickers/wave.png",
+  "./assets/stickers/goodnight.png",
+  "./assets/stickers/sorry.png",
+  "./assets/stickers/happy.png",
+  "./assets/stickers/down.png",
+  "./assets/stickers/troubled.png",
+  "./assets/stickers/clap.png",
+  "./assets/stickers/hungry.png",
+  "./assets/stickers/itadakimasu.png",
+  "./assets/stickers/areyouok.png",
+  "./assets/stickers/ganbare.png",
   "./assets/proactive/food-cocoa-bread.jpg",
   "./assets/proactive/desk-game.jpg",
   "./assets/proactive/sunset-after-rain.jpg",
