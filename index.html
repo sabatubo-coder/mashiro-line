@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 3.1.3</title>
+  <title>ましろLINE（仮） Phase 3.1.4</title>
   <style>
 :root {
   color-scheme: light;
@@ -1272,7 +1272,7 @@ const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
-const PUSH_VERSION = "phase3.1.3-opening-phrase-repetition-guard-v1";
+const PUSH_VERSION = "phase3.1.4-topic-origin-diversity-v1";
 
 
 const SELF_PROFILE = {
@@ -1819,7 +1819,7 @@ function groupReadCount(message,group){
     ).size;
   }
 
-  // Phase 3.1.3以前の既存グループ送信メッセージとの互換。
+  // Phase 3.1.4以前の既存グループ送信メッセージとの互換。
   if(message?.readByCharacter)return valid.size;
   return 0;
 }
@@ -1848,7 +1848,7 @@ function markGroupOutgoingReadThrough(
   for(const message of messages){
     if(message.senderId!=="mashiro")continue;
 
-    // Phase 3.1.3: 旧方式で既に全員既読なら、その状態を維持する。
+    // Phase 3.1.4: 旧方式で既に全員既読なら、その状態を維持する。
     if(message.readByCharacter===true){
       const allReaders=groupAiParticipantIds(group);
       const current=Array.isArray(message.readByCharacters)
@@ -2785,7 +2785,7 @@ async function sendUserMessage(){
         result?.groupTiming &&
         enqueueDelayedGroupResult(conversation,userMessage,result)
       ){
-        // Phase 3.1.3:
+        // Phase 3.1.4:
         // 既読・返信は各キャラの生活モデル時刻に従って後から反映。
       }else{
         // 互換フォールバック。新Backendが使えない場合だけ従来動作。

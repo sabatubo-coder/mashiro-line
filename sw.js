@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-1-3-opening-phrase-repetition-guard-v1";
+const CACHE_NAME = "mashiro-line-phase3-1-4-topic-origin-diversity-v1";
 const ASSETS = [
   "./",
   "./index.html",
