@@ -1441,7 +1441,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.11-proactive-character-image-message-v1";
+const PUSH_VERSION = "phase3.2.12-image-conversation-context-memory-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -1978,6 +1978,52 @@ function propagateGroupMemoryCandidatesToParticipants(group,candidates){
       sourceConversationId:group.conversationId
     });
   }
+}
+
+
+// Phase 3.2.12: キャラクターが送った写真を短期の会話記憶として保持する。
+// 写真そのものを永続プロフィール化せず、7日程度の「最近の出来事」として扱う。
+function imageMemoryDateLabel(createdAt){
+  const date=new Date(createdAt||Date.now());
+  if(Number.isNaN(date.getTime()))return "最近";
+  return new Intl.DateTimeFormat("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(date);
+}
+
+function characterImageMemoryCandidate(conversation,message){
+  if(!conversation||!message||message.senderId==="mashiro"||messageTypeOf(message)!=="image")return null;
+  const sender=characterById(message.senderId);
+  if(!sender)return null;
+  const builtIn=proactiveImageAsset(message.imageAssetId);
+  const summary=String(message.mediaSummary||builtIn?.summary||"").trim().slice(0,220);
+  if(!summary)return null;
+  const caption=String(message.text||"").trim().replace(/\s+/g," ").slice(0,100);
+  const createdAt=message.createdAt||new Date().toISOString();
+  const minute=Math.floor((Date.parse(createdAt)||Date.now())/60000);
+  const assetKey=String(message.imageAssetId||"photo").toLowerCase().replace(/[^a-z0-9_]+/g,"_").slice(0,40)||"photo";
+  const scopeLabel=conversation.type==="group"?`グループ「${getGroupName(conversation.groupId)}」`:`ましろとの個別LINE`;
+  const text=`${imageMemoryDateLabel(createdAt)}ごろ、${sender.displayName}が${scopeLabel}に「${summary}」の写真を送った。ましろもその写真を見ている。${caption?`添え文は「${caption}」。`:""}`;
+  return{
+    key:`sent_image_${message.senderId}_${assetKey}_${minute}`,
+    text,
+    category:"event",
+    importance:1,
+    ttlDays:7,
+    followUpStatus:"none",
+    followUpUntilDays:0
+  };
+}
+
+function rememberCharacterSentImage(conversation,message){
+  const candidate=characterImageMemoryCandidate(conversation,message);
+  if(!candidate)return;
+  if(conversation.type==="dm"){
+    mergeMemoryCandidates(message.senderId,[candidate],{sourceType:"dm",sourceConversationId:conversation.id});
+    return;
+  }
+  const group=groupById(conversation.groupId);
+  if(!group)return;
+  mergeGroupMemoryCandidates(group.id,[candidate],{sourceType:"group",sourceConversationId:conversation.id});
+  propagateGroupMemoryCandidatesToParticipants(group,[candidate]);
 }
 
 function markFollowUpMemoryRecovered(characterId,key){
@@ -2868,6 +2914,7 @@ function addMessage(conversationId,senderId,text,options={}){
 
   messages.push(message);
   saveConversationMessages(conversationId,messages);
+  if(senderId!=="mashiro"&&messageTypeOf(message)==="image")rememberCharacterSentImage(conversation,message);
 
   if(activeVisible){
     if(senderId!=="mashiro")markIncomingSeen(conversationId);
@@ -4108,7 +4155,7 @@ function pushDiagnosticsText(data){
     const q=n.phase329ConversationQuality;
     lines.push(
       "",
-      "Phase 3.2.10a〜3.2.11 会話品質・表現制御: 有効",
+      "Phase 3.2.10a〜3.2.12 会話品質・表現制御: 有効",
       `オンライン共有範囲: ${q.onlineScope==="character_wide_dm_and_group"?"DM↔グループでキャラ単位":"トーク単位"}`,
       `DM→グループ高速既読: ${q.dmToGroupFastRead?"有効":"無効"}`,
       `グループ→DM高速既読: ${q.groupToDmFastRead?"有効":"無効"}`,
@@ -4123,8 +4170,11 @@ function pushDiagnosticsText(data){
     lines.push(
       "",
       "Phase 3.2.11 キャラクター自発画像メッセージ: 有効",
+      "Phase 3.2.12 画像会話コンテキスト・画像記憶: 有効",
       `DM画像形式: 写真単体 / 写真＋添え文 / 短文→写真`,
       `画像候補率: 約${i.imageChancePercent??14}%（自然さ判定で送らない場合あり）`,
+      `画像会話コンテキスト: 直近画像への「これ／さっきの写真」参照を有効`,
+      `キャラ送信画像記憶: 7日程度の短期イベント記憶として保持`,
       `画像の最短間隔: ${i.minimumIntervalHours??18}時間`,
       `同一素材の再利用抑制: ${i.sameAssetRepeatWindowHours??72}時間`,
       `内蔵写真素材: ${i.assetCount??4}種類`,
