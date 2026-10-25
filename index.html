@@ -1441,7 +1441,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.7-badge-sync-semantic-duplicate-v1";
+const PUSH_VERSION = "phase3.2.8-push-delivery-diagnostics-reliability-v1";
 const MEDIA_DB_NAME = "mashiroLine.media.v1";
 const MEDIA_DB_STORE = "media";
 const CHAT_IMAGE_MAX_BYTES = 450000;
@@ -3903,6 +3903,54 @@ function pushDiagnosticsText(data){
       `Push受信ACKと実読seenの分離: ${s.ackSeparatedFromSeen?"有効":"無効"}`,
       `未読バッジ累積: ${s.perMessageBadgeAccumulation?"1メッセージずつ加算":"無効"}`
     );
+  }
+
+  if(n.phase328PushReliability){
+    const p=n.phase328PushReliability;
+    lines.push(
+      "",
+      "Phase 3.2.8 Push配信診断・信頼性: 有効",
+      `Push確認間隔: 約${p.sweepIntervalSeconds??10}秒`,
+      `1回に処理する配信上限: ${p.drainMaxPerDevice??16}件 / 端末`,
+      `Pushサービス受理ログ: ${p.pushServiceAcceptanceTrace?"有効":"無効"}`,
+      `再送バックオフ: ${p.retryBackoffEnabled?"有効":"無効"}`,
+      "診断の見方: push_service_accepted=Apple/Web Push側への受理成功、due_not_attempted=Backendがまだ送信していない"
+    );
+  }
+
+  if(data.deliveryTrace){
+    const t=data.deliveryTrace;
+    lines.push(
+      "",
+      "直近Push配信ログ",
+      `サーバー未読: ${t.unreadCount??0}件`,
+      `送信待ち（到着時刻済み）: ${t.dueUnsentCount??0}件`,
+      `再送待ち: ${t.retryPendingCount??0}件`,
+      `配信スイープ: 約${t.sweepIntervalSeconds??10}秒`
+    );
+
+    const stateLabel=(state)=>({
+      seen:"既読済み",
+      waiting_for_deliver_after:"到着時刻前",
+      push_service_accepted:"Pushサービス受理",
+      retry_pending:"再送待ち",
+      push_service_rejected:"Pushサービス拒否",
+      sending:"送信処理中",
+      due_not_attempted:"到着時刻済み・未送信"
+    }[state]||state||"不明");
+
+    const events=Array.isArray(t.events)?t.events.slice(0,8):[];
+    for(const event of events){
+      const time=formatDiagnosticTime(
+        event.pushLastAttemptAt||
+        event.pushDeliveredAt||
+        event.deliverAfter||
+        event.dbCreatedAt
+      );
+      lines.push(
+        `・${time} ${stateLabel(event.state)} / 試行${event.pushAttemptCount??0}回 / ${event.messagePreview||"(本文なし)"}`
+      );
+    }
   }
 
   if(n.phase327Quality){
