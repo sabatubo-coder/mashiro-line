@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ましろLINE" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <title>ましろLINE（仮） Phase 3.1.4</title>
+  <title>ましろLINE（仮） Phase 3.2</title>
   <style>
 :root {
   color-scheme: light;
@@ -440,16 +440,130 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .composer {
-  display: grid;
-  grid-template-columns: 1fr 42px;
-  gap: 8px;
-  align-items: end;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  display: block;
+  padding: 7px 10px calc(8px + env(safe-area-inset-bottom));
   background: rgba(248,248,250,.97);
   border-top: 1px solid var(--line);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
 }
+
+.composer-main {
+  display: grid;
+  grid-template-columns: 38px 38px 1fr 42px;
+  gap: 6px;
+  align-items: end;
+}
+
+.composer-tool-button {
+  width: 38px;
+  height: 42px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  color: #687078;
+  font-size: 25px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+
+.composer-tool-button:active { background: rgba(0,0,0,.055); }
+
+.attachment-preview {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin: 0 0 7px 4px;
+  padding: 7px;
+  max-width: 250px;
+  border-radius: 13px;
+  background: white;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+.attachment-preview[hidden] { display: none; }
+.attachment-preview img {
+  width: 62px;
+  height: 62px;
+  object-fit: cover;
+  border-radius: 9px;
+  background: #e8eaed;
+}
+.attachment-preview-copy { flex: 1; min-width: 0; }
+.attachment-preview-title { font-size: 12px; font-weight: 700; }
+.attachment-preview-sub { margin-top: 2px; color: #777b82; font-size: 10px; }
+.attachment-remove {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: #eef0f2;
+  color: #555b62;
+  font-size: 16px;
+}
+
+.sticker-panel {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 7px;
+  max-height: 210px;
+  overflow: auto;
+  padding: 8px 2px 10px;
+}
+.sticker-panel[hidden] { display: none; }
+.sticker-choice {
+  border: 0;
+  border-radius: 14px;
+  padding: 8px 4px 6px;
+  background: white;
+  box-shadow: 0 1px 4px rgba(0,0,0,.07);
+  color: #292b2f;
+}
+.sticker-choice-emoji { display: block; font-size: 29px; line-height: 1.05; }
+.sticker-choice-label { display: block; margin-top: 4px; font-size: 9px; }
+
+.media-message {
+  overflow: hidden;
+  border-radius: 16px;
+  background: white;
+  box-shadow: var(--shadow);
+  max-width: 260px;
+}
+.media-message img {
+  display: block;
+  width: 100%;
+  max-height: 340px;
+  object-fit: contain;
+  background: #e7e9ec;
+}
+.media-caption {
+  padding: 8px 10px 9px;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.outgoing .media-caption { background: var(--outgoing); }
+.media-image-missing {
+  min-width: 180px;
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: #777b82;
+  font-size: 12px;
+  background: #e7e9ec;
+}
+
+.sticker-message {
+  min-width: 112px;
+  min-height: 102px;
+  padding: 11px 10px 9px;
+  border-radius: 22px;
+  background: rgba(255,255,255,.9);
+  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  text-align: center;
+}
+.sticker-message-emoji { font-size: 49px; line-height: 1; }
+.sticker-message-label { margin-top: 7px; font-size: 12px; font-weight: 800; color: #4d535a; }
 
 .message-input {
   width: 100%;
@@ -1174,8 +1288,22 @@ button { -webkit-tap-highlight-color: transparent; }
     </div>
 
     <form id="composer" class="composer">
-      <textarea id="messageInput" class="message-input" rows="1" maxlength="1200" placeholder="メッセージ"></textarea>
-      <button id="sendButton" class="send-button" type="submit" disabled>➤</button>
+      <div id="attachmentPreview" class="attachment-preview" hidden>
+        <img id="attachmentPreviewImage" alt="送信する写真のプレビュー" />
+        <div class="attachment-preview-copy">
+          <div class="attachment-preview-title">写真を送信</div>
+          <div class="attachment-preview-sub">メッセージ欄に添え文も追加できます</div>
+        </div>
+        <button id="attachmentRemoveButton" class="attachment-remove" type="button" aria-label="写真を取り消す">×</button>
+      </div>
+      <div id="stickerPanel" class="sticker-panel" hidden></div>
+      <div class="composer-main">
+        <button id="photoButton" class="composer-tool-button" type="button" aria-label="写真を送る">＋</button>
+        <button id="stickerButton" class="composer-tool-button" type="button" aria-label="スタンプを送る">☺︎</button>
+        <textarea id="messageInput" class="message-input" rows="1" maxlength="1200" placeholder="メッセージ"></textarea>
+        <button id="sendButton" class="send-button" type="submit" disabled>➤</button>
+      </div>
+      <input id="chatImageInput" type="file" accept="image/*" hidden />
     </form>
   </section>
 
@@ -1272,7 +1400,21 @@ const PUSH_DEVICE_ID_KEY = "mashiroLine.phase2_4.push.deviceId.v1";
 const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
-const PUSH_VERSION = "phase3.1.4-topic-origin-diversity-v1";
+const PUSH_VERSION = "phase3.2-image-photo-sticker-v1";
+const MEDIA_DB_NAME = "mashiroLine.media.v1";
+const MEDIA_DB_STORE = "media";
+const CHAT_IMAGE_MAX_BYTES = 450000;
+
+const STICKERS = {
+  smile:{id:"smile",label:"にこ",emoji:"😊"},
+  laugh:{id:"laugh",label:"わはは",emoji:"😆"},
+  ok:{id:"ok",label:"OK",emoji:"👌"},
+  thanks:{id:"thanks",label:"ありがと",emoji:"🙌"},
+  cheer:{id:"cheer",label:"がんばれ",emoji:"💪"},
+  surprise:{id:"surprise",label:"びっくり",emoji:"😳"},
+  sleepy:{id:"sleepy",label:"ねむい",emoji:"😴"},
+  wave:{id:"wave",label:"またね",emoji:"👋"}
+};
 
 
 const SELF_PROFILE = {
@@ -1344,7 +1486,10 @@ const appState = {
   presenceTimer: null,
   presenceBusy: false,
   presenceRequestSeq: 0,
-  groupAutonomousTestBusy: false
+  groupAutonomousTestBusy: false,
+  pendingImage: null,
+  pendingImagePreviewUrl: "",
+  stickerPanelOpen: false
 };
 
 const listScreen = document.getElementById("listScreen");
@@ -1366,6 +1511,13 @@ const typingLabel = document.getElementById("typingLabel");
 const composer = document.getElementById("composer");
 const messageInput = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
+const photoButton = document.getElementById("photoButton");
+const stickerButton = document.getElementById("stickerButton");
+const stickerPanel = document.getElementById("stickerPanel");
+const chatImageInput = document.getElementById("chatImageInput");
+const attachmentPreview = document.getElementById("attachmentPreview");
+const attachmentPreviewImage = document.getElementById("attachmentPreviewImage");
+const attachmentRemoveButton = document.getElementById("attachmentRemoveButton");
 const toast = document.getElementById("toast");
 
 const settingsBackButton = document.getElementById("settingsBackButton");
@@ -1396,6 +1548,144 @@ const resetMemoryCheckbox = document.getElementById("resetMemoryCheckbox");
 const resetMemoryLabel = document.getElementById("resetMemoryLabel");
 const confirmReset = document.getElementById("confirmReset");
 
+
+
+function normalizeStickerId(value){const id=String(value||"").trim().toLowerCase();return STICKERS[id]?id:"";}
+function stickerToken(id){const value=normalizeStickerId(id);return value?`[[STAMP:${value}]]`:"";}
+function stickerIdFromText(value){const match=String(value||"").trim().match(/^\[\[STAMP:([a-z0-9_-]+)\]\]$/i);return normalizeStickerId(match?.[1]);}
+function messageTypeOf(message){
+  if(message?.messageType==="image")return "image";
+  if(message?.messageType==="sticker"||normalizeStickerId(message?.stickerId)||stickerIdFromText(message?.text))return "sticker";
+  return "text";
+}
+function messageStickerId(message){return normalizeStickerId(message?.stickerId)||stickerIdFromText(message?.text);}
+function messagePreviewText(message){
+  if(!message)return "";
+  const type=messageTypeOf(message);
+  if(type==="sticker")return "スタンプ";
+  if(type==="image")return String(message.text||"").trim()?`写真: ${String(message.text).trim()}`:"写真";
+  return String(message.text||"");
+}
+
+function openMediaDb(){
+  return new Promise((resolve,reject)=>{
+    const request=indexedDB.open(MEDIA_DB_NAME,1);
+    request.onupgradeneeded=()=>{
+      const db=request.result;
+      if(!db.objectStoreNames.contains(MEDIA_DB_STORE)){
+        const store=db.createObjectStore(MEDIA_DB_STORE,{keyPath:"id"});
+        store.createIndex("conversationId","conversationId",{unique:false});
+      }
+    };
+    request.onsuccess=()=>resolve(request.result);
+    request.onerror=()=>reject(request.error||new Error("media_db_open_failed"));
+  });
+}
+
+async function putMediaRecord(record){
+  const db=await openMediaDb();
+  try{
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(MEDIA_DB_STORE,"readwrite");
+      tx.objectStore(MEDIA_DB_STORE).put(record);
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+  }finally{db.close();}
+}
+
+async function getMediaRecord(id){
+  if(!id)return null;
+  const db=await openMediaDb();
+  try{
+    return await new Promise((resolve,reject)=>{
+      const tx=db.transaction(MEDIA_DB_STORE,"readonly");
+      const request=tx.objectStore(MEDIA_DB_STORE).get(id);
+      request.onsuccess=()=>resolve(request.result||null);
+      request.onerror=()=>reject(request.error);
+    });
+  }finally{db.close();}
+}
+
+async function deleteMediaForConversation(conversationId){
+  const db=await openMediaDb();
+  try{
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(MEDIA_DB_STORE,"readwrite");
+      const store=tx.objectStore(MEDIA_DB_STORE);
+      const index=store.index("conversationId");
+      const request=index.openCursor(IDBKeyRange.only(conversationId));
+      request.onsuccess=()=>{const cursor=request.result;if(cursor){cursor.delete();cursor.continue();}};
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+  }catch{}finally{db.close();}
+}
+
+function blobToDataUrl(blob){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||""));reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob);});}
+
+function loadImageElementFromFile(file){
+  return new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(file);const img=new Image();
+    img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("image_load_failed"));};
+    img.src=url;
+  });
+}
+
+function canvasToBlob(canvas,quality){return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error("image_encode_failed")),"image/jpeg",quality));}
+
+async function prepareChatImage(file){
+  if(!file||!String(file.type||"").startsWith("image/"))throw new Error("not_image");
+  const img=await loadImageElementFromFile(file);
+  let maxSide=1280;let quality=.8;let latest=null;
+  for(let attempt=0;attempt<7;attempt+=1){
+    const scale=Math.min(1,maxSide/Math.max(img.naturalWidth,img.naturalHeight));
+    const width=Math.max(1,Math.round(img.naturalWidth*scale));
+    const height=Math.max(1,Math.round(img.naturalHeight*scale));
+    const canvas=document.createElement("canvas");canvas.width=width;canvas.height=height;
+    const ctx=canvas.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,width,height);ctx.drawImage(img,0,0,width,height);
+    const blob=await canvasToBlob(canvas,quality);latest={blob,width,height,mime:"image/jpeg"};
+    if(blob.size<=CHAT_IMAGE_MAX_BYTES)return latest;
+    maxSide=Math.max(720,Math.round(maxSide*.84));quality=Math.max(.52,quality-.06);
+  }
+  return latest;
+}
+
+function clearPendingImage(){
+  appState.pendingImage=null;
+  if(appState.pendingImagePreviewUrl){URL.revokeObjectURL(appState.pendingImagePreviewUrl);appState.pendingImagePreviewUrl="";}
+  attachmentPreview.hidden=true;attachmentPreviewImage.removeAttribute("src");chatImageInput.value="";autosizeInput();
+}
+
+function setPendingImage(prepared){
+  clearPendingImage();appState.pendingImage=prepared;appState.pendingImagePreviewUrl=URL.createObjectURL(prepared.blob);
+  attachmentPreviewImage.src=appState.pendingImagePreviewUrl;attachmentPreview.hidden=false;closeStickerPanel();autosizeInput();
+}
+
+function closeStickerPanel(){appState.stickerPanelOpen=false;stickerPanel.hidden=true;}
+function toggleStickerPanel(){appState.stickerPanelOpen=!appState.stickerPanelOpen;stickerPanel.hidden=!appState.stickerPanelOpen;if(appState.stickerPanelOpen)clearPendingImage();}
+
+function renderStickerPanel(){
+  stickerPanel.replaceChildren();
+  for(const sticker of Object.values(STICKERS)){
+    const button=document.createElement("button");button.type="button";button.className="sticker-choice";button.dataset.stickerId=sticker.id;
+    const emoji=document.createElement("span");emoji.className="sticker-choice-emoji";emoji.textContent=sticker.emoji;
+    const label=document.createElement("span");label.className="sticker-choice-label";label.textContent=sticker.label;
+    button.append(emoji,label);button.addEventListener("click",()=>sendStickerMessage(sticker.id));stickerPanel.appendChild(button);
+  }
+}
+
+async function hydrateMessageImage(container,message){
+  try{
+    const record=await getMediaRecord(message.mediaId);if(!record?.blob)throw new Error("missing");
+    const img=document.createElement("img");const url=URL.createObjectURL(record.blob);img.src=url;img.alt="送信された写真";img.onload=()=>setTimeout(()=>URL.revokeObjectURL(url),1500);container.replaceChildren(img);
+  }catch{container.classList.add("media-image-missing");container.textContent="写真";}
+}
+
+function updateMessageMediaSummary(conversationId,messageId,summary){
+  if(!summary)return;
+  const messages=loadConversationMessages(conversationId);const target=messages.find(m=>m.id===messageId);if(!target)return;
+  target.mediaSummary=String(summary).trim().slice(0,300);saveConversationMessages(conversationId,messages);
+}
 
 function seedNatsuki() {
   const now = new Date();
@@ -1622,7 +1912,7 @@ function renderTalkList(){
     const top=document.createElement("div");top.className="talk-topline";
     const name=document.createElement("div");name.className="talk-name";name.textContent=conversation.type==="dm"?getCharacterDisplayName(conversation.characterId):getGroupName(conversation.groupId);top.appendChild(name);
     const preview=document.createElement("div");preview.className="talk-preview";
-    if(last){const prefix=conversation.type==="group"?`${senderDisplayName(last.senderId)}: `:"";preview.textContent=prefix+last.text;}else preview.textContent="まだメッセージはありません";
+    if(last){const prefix=conversation.type==="group"?`${senderDisplayName(last.senderId)}: `:"";preview.textContent=prefix+messagePreviewText(last);}else preview.textContent="まだメッセージはありません";
     main.append(top,preview);
     const side=document.createElement("div");side.className="talk-side";const time=document.createElement("div");time.className="talk-time";time.textContent=last?formatListTime(last.createdAt):"";side.appendChild(time);
     if(unread>0){const badge=document.createElement("div");badge.className="unread-badge";badge.textContent=unread>99?"99+":String(unread);side.appendChild(badge);}
@@ -1803,7 +2093,7 @@ function openConversation(conversationId,pushHistory=true){
   if(presenceSupportedConversation(conversation))schedulePresenceRefresh(80);
   if(pushHistory)history.pushState({conversationId},"",`#chat=${conversationId}`);
 }
-function showTalkList(pushHistory=true){appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
+function showTalkList(pushHistory=true){appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";clearPendingImage();closeStickerPanel();autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
 
 
 function groupAiParticipantIds(group){
@@ -1819,7 +2109,7 @@ function groupReadCount(message,group){
     ).size;
   }
 
-  // Phase 3.1.4以前の既存グループ送信メッセージとの互換。
+  // Phase 3.2以前の既存グループ送信メッセージとの互換。
   if(message?.readByCharacter)return valid.size;
   return 0;
 }
@@ -1848,7 +2138,7 @@ function markGroupOutgoingReadThrough(
   for(const message of messages){
     if(message.senderId!=="mashiro")continue;
 
-    // Phase 3.1.4: 旧方式で既に全員既読なら、その状態を維持する。
+    // Phase 3.2: 旧方式で既に全員既読なら、その状態を維持する。
     if(message.readByCharacter===true){
       const allReaders=groupAiParticipantIds(group);
       const current=Array.isArray(message.readByCharacters)
@@ -1971,7 +2261,23 @@ function renderMessages(){
     if(!outgoing){const mini=document.createElement("div");applyCharacterAvatar(mini,message.senderId);mini.classList.add("mini-avatar");row.appendChild(mini);}
     const stack=document.createElement("div");stack.className="message-stack";
     if(conversation.type==="group"&&!outgoing){const sender=document.createElement("div");sender.className="sender-name";sender.textContent=senderDisplayName(message.senderId);stack.appendChild(sender);}
-    const bubble=document.createElement("div");bubble.className="bubble";bubble.textContent=message.text;
+    const type=messageTypeOf(message);
+    let contentNode;
+    if(type==="image"){
+      contentNode=document.createElement("div");contentNode.className="media-message";
+      const imageHolder=document.createElement("div");imageHolder.className="media-image-holder";imageHolder.textContent="写真を読み込み中…";contentNode.appendChild(imageHolder);hydrateMessageImage(imageHolder,message);
+      if(String(message.text||"").trim()){
+        const caption=document.createElement("div");caption.className="media-caption";caption.textContent=message.text;contentNode.appendChild(caption);
+      }
+    }else if(type==="sticker"){
+      const sticker=STICKERS[messageStickerId(message)]||STICKERS.smile;
+      contentNode=document.createElement("div");contentNode.className="sticker-message";
+      const emoji=document.createElement("div");emoji.className="sticker-message-emoji";emoji.textContent=sticker.emoji;
+      const label=document.createElement("div");label.className="sticker-message-label";label.textContent=sticker.label;
+      contentNode.append(emoji,label);
+    }else{
+      contentNode=document.createElement("div");contentNode.className="bubble";contentNode.textContent=message.text;
+    }
     const meta=document.createElement("div");meta.className="message-meta";
     if(outgoing){
       if(conversation.type==="group"){
@@ -1987,7 +2293,7 @@ function renderMessages(){
         meta.appendChild(read);
       }
     }
-    const clock=document.createElement("span");clock.textContent=formatClock(message.createdAt);meta.appendChild(clock);stack.append(bubble,meta);row.appendChild(stack);messageList.appendChild(row);
+    const clock=document.createElement("span");clock.textContent=formatClock(message.createdAt);meta.appendChild(clock);stack.append(contentNode,meta);row.appendChild(stack);messageList.appendChild(row);
   }
 }
 function scrollToBottom(behavior="smooth"){requestAnimationFrame(()=>messageList.scrollTo({top:messageList.scrollHeight,behavior}));}
@@ -2137,7 +2443,7 @@ function setTyping(visible,speakerId=null){
     statusText.textContent="オンライン";
   }
 }
-function autosizeInput(){messageInput.style.height="auto";messageInput.style.height=`${Math.min(messageInput.scrollHeight,120)}px`;sendButton.disabled=!messageInput.value.trim()||appState.isReplying||!appState.activeConversationId;}
+function autosizeInput(){messageInput.style.height="auto";messageInput.style.height=`${Math.min(messageInput.scrollHeight,120)}px`;const hasContent=Boolean(messageInput.value.trim()||appState.pendingImage);sendButton.disabled=!hasContent||appState.isReplying||!appState.activeConversationId;}
 
 function addMessage(conversationId,senderId,text,options={}){
   const conversation=conversationById(conversationId);
@@ -2148,6 +2454,13 @@ function addMessage(conversationId,senderId,text,options={}){
     pushEventId:options.pushEventId||null,
     senderId,
     text:String(text||"").trim(),
+    messageType:options.messageType||((stickerIdFromText(text)||options.stickerId)?"sticker":"text"),
+    stickerId:normalizeStickerId(options.stickerId)||stickerIdFromText(text)||"",
+    mediaId:String(options.mediaId||""),
+    mediaMime:String(options.mediaMime||""),
+    mediaWidth:Number(options.mediaWidth||0)||0,
+    mediaHeight:Number(options.mediaHeight||0)||0,
+    mediaSummary:String(options.mediaSummary||"").slice(0,300),
     createdAt:options.createdAt||new Date().toISOString(),
     readByCharacter:senderId==="mashiro"?Boolean(options.readByCharacter):true,
     readByCharacters:
@@ -2696,11 +3009,32 @@ function endpointFor(apiEndpoint,kind){
 }
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
 async function warmBackend(apiEndpoint){const health=endpointFor(apiEndpoint,"health");const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),10000);try{await fetch(health,{method:"GET",cache:"no-store",signal:controller.signal});}catch{}finally{clearTimeout(timeout);}}
-function recentHistoryForAPI(conversationId){return loadConversationMessages(conversationId).slice(-40).map(m=>({senderId:m.senderId,text:m.text,createdAt:m.createdAt}));}
+function recentHistoryForAPI(conversationId){return loadConversationMessages(conversationId).slice(-40).map(m=>({
+  senderId:m.senderId,
+  text:m.text,
+  createdAt:m.createdAt,
+  messageType:messageTypeOf(m),
+  stickerId:messageStickerId(m),
+  mediaSummary:String(m.mediaSummary||"").slice(0,300)
+}));}
+
+async function recentHistoryWithLatestImageForAPI(conversationId){
+  const source=loadConversationMessages(conversationId).slice(-40);
+  const out=recentHistoryForAPI(conversationId);
+  let latestIndex=-1;
+  for(let i=source.length-1;i>=0;i-=1){if(source[i]?.senderId==="mashiro"&&messageTypeOf(source[i])==="image"&&source[i]?.mediaId){latestIndex=i;break;}}
+  if(latestIndex<0)return out;
+  // 画像の直後に別のましろ発言がある場合は、古い画像を毎回再送しない。
+  for(let i=latestIndex+1;i<source.length;i+=1){if(source[i]?.senderId==="mashiro")return out;}
+  try{
+    const record=await getMediaRecord(source[latestIndex].mediaId);if(record?.blob){out[latestIndex].imageDataUrl=await blobToDataUrl(record.blob);}
+  }catch{}
+  return out;
+}
 
 async function fetchJsonWithRetry(endpoint,options,retries=1){let lastError;for(let attempt=0;attempt<=retries;attempt++){const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),60000);try{const response=await fetch(endpoint,{...options,signal:controller.signal,cache:"no-store"});const data=await response.json().catch(()=>({}));if(response.status===401){localStorage.removeItem(ACCESS_CODE_KEY);throw Object.assign(new Error("invalid_app_code"),{code:"invalid_app_code"});}if(!response.ok){const e=Object.assign(new Error(String(data?.error||`http_${response.status}`)),{code:[429,500,502,503,504].includes(response.status)?"temporary_error":response.status===403?"origin_not_allowed":"api_error"});throw e;}return data;}catch(error){lastError=error;const retryable=error?.name==="AbortError"||error instanceof TypeError||error?.code==="temporary_error";if(!retryable||attempt===retries)throw error;await sleep(1800);}finally{clearTimeout(timeout);}}throw lastError;}
 
-async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages:recentHistoryForAPI(conversation.id),memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true})});}
+async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);const messages=await recentHistoryWithLatestImageForAPI(conversation.id);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages,memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true})});}
 function privateMemoriesForGroup(group){const map={};for(const id of group.participants){if(id!=="mashiro"&&characterById(id))map[id]=memoriesForAPI(id);}return map;}
 async function callGroupChat(conversation,accessCode,apiEndpoint){
   const group=groupById(conversation.groupId);
@@ -2715,7 +3049,7 @@ async function callGroupChat(conversation,accessCode,apiEndpoint){
       body:JSON.stringify({
         groupId:group.id,
         conversationId:conversation.id,
-        messages:recentHistoryForAPI(conversation.id),
+        messages:await recentHistoryWithLatestImageForAPI(conversation.id),
         sharedMemories:groupMemoriesForAPI(group.id),
         privateMemoriesByCharacter:privateMemoriesForGroup(group),
         currentTime:new Date().toLocaleString(
@@ -2730,103 +3064,103 @@ async function callGroupChat(conversation,accessCode,apiEndpoint){
   );
 }
 
-async function sendUserMessage(){
-  const conversation=activeConversation();const text=messageInput.value.trim();if(!conversation||!text||appState.isReplying)return;
-  const userMessage=addMessage(conversation.id,"mashiro",text,{readByCharacter:false,source:"user"});
-  messageInput.value="";autosizeInput();appState.isReplying=true;sendButton.disabled=true;
+async function sendUserPayload({text="",messageType="text",stickerId="",image=null}={}){
+  const conversation=activeConversation();
+  const cleanText=String(text||"").trim();
+  if(!conversation||appState.isReplying)return;
+  if(messageType==="text"&&!cleanText)return;
+  if(messageType==="image"&&!image)return;
+  if(messageType==="sticker"&&!normalizeStickerId(stickerId))return;
+
+  let mediaId="";
+  if(messageType==="image"){
+    mediaId=`media-${makeId()}`;
+    try{
+      await putMediaRecord({
+        id:mediaId,
+        conversationId:conversation.id,
+        blob:image.blob,
+        mime:image.mime,
+        width:image.width,
+        height:image.height,
+        createdAt:new Date().toISOString()
+      });
+    }catch(error){console.error(error);showToast("写真を保存できませんでした");return;}
+  }
+
+  const storedText=messageType==="sticker"?stickerToken(stickerId):cleanText;
+  const userMessage=addMessage(conversation.id,"mashiro",storedText,{
+    readByCharacter:false,
+    source:"user",
+    messageType,
+    stickerId,
+    mediaId,
+    mediaMime:image?.mime||"",
+    mediaWidth:image?.width||0,
+    mediaHeight:image?.height||0
+  });
+
+  messageInput.value="";clearPendingImage();closeStickerPanel();autosizeInput();appState.isReplying=true;sendButton.disabled=true;
 
   const apiEndpoint=getApiEndpoint();
-  if(!apiEndpoint){
-    appState.isReplying=false;autosizeInput();showToast("AIバックエンドURLが設定されていません");return;
-  }
-
-  let accessCode=getAccessCode();
-  if(!accessCode)accessCode=await askForAccessCode();
-  if(!accessCode){
-    appState.isReplying=false;autosizeInput();return;
-  }
-
+  if(!apiEndpoint){appState.isReplying=false;autosizeInput();showToast("AIバックエンドURLが設定されていません");return;}
+  let accessCode=getAccessCode();if(!accessCode)accessCode=await askForAccessCode();
+  if(!accessCode){appState.isReplying=false;autosizeInput();return;}
   await warmBackend(apiEndpoint);
 
   try{
     if(conversation.type==="dm"){
       const result=await callDmChat(conversation,accessCode,apiEndpoint);
+      if(result?.mediaSummary)updateMessageMediaSummary(conversation.id,userMessage.id,result.mediaSummary);
       mergeMemoryCandidates(conversation.characterId,result.memoryCandidates);
 
       if(result?.replyTiming&&enqueueDelayedDmResult(conversation,userMessage,result)){
         scheduleDmProactive(conversation.characterId,"normal");
       }else{
-        // 生活モデル未対応キャラは従来どおり短い即時返信。
-        await sleep(350);
-        markOutgoingReadThrough(conversation.id,userMessage.createdAt);
-        setTyping(true);
-        await sleep(650);
-        setTyping(false);
-        addMessage(
-          conversation.id,
-          conversation.characterId,
-          String(result.reply||"").trim(),
-          {source:"ai",seenByUser:true}
-        );
+        await sleep(350);markOutgoingReadThrough(conversation.id,userMessage.createdAt);setTyping(true);await sleep(650);setTyping(false);
+        addMessage(conversation.id,conversation.characterId,String(result.reply||"").trim(),{source:"ai",seenByUser:true});
         scheduleDmProactive(conversation.characterId,"normal");
       }
     }else{
-      // ましろが途中参加したら、Backendに残っている
-      // 自律会話の続きはキャンセルし、今回の発言への返信を優先する。
       await cancelPendingGroupAutonomous(conversation.groupId);
+      const result=await callGroupChat(conversation,accessCode,apiEndpoint);
+      if(result?.mediaSummary)updateMessageMediaSummary(conversation.id,userMessage.id,result.mediaSummary);
 
-      const result=await callGroupChat(
-        conversation,
-        accessCode,
-        apiEndpoint
-      );
-
-      if(
-        result?.groupTiming &&
-        enqueueDelayedGroupResult(conversation,userMessage,result)
-      ){
-        // Phase 3.1.4:
-        // 既読・返信は各キャラの生活モデル時刻に従って後から反映。
+      if(result?.groupTiming&&enqueueDelayedGroupResult(conversation,userMessage,result)){
+        // 既読・返信は各キャラの生活モデル時刻に従う。
       }else{
-        // 互換フォールバック。新Backendが使えない場合だけ従来動作。
-        await sleep(350);
-        markOutgoingRead(conversation.id);
-        setTyping(true);
-        const replies=Array.isArray(result.replies)?result.replies.slice(0,3):[];
-        setTyping(false);
-
+        await sleep(350);markOutgoingRead(conversation.id);setTyping(true);
+        const replies=Array.isArray(result.replies)?result.replies.slice(0,3):[];setTyping(false);
         for(const reply of replies){
           if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
-          setTyping(true,reply.speakerId);
-          await sleep(550+Math.min(850,String(reply.message).length*12));
-          setTyping(false);
-          addMessage(
-            conversation.id,
-            reply.speakerId,
-            String(reply.message).trim(),
-            {source:"group-ai-fallback",seenByUser:true}
-          );
+          setTyping(true,reply.speakerId);await sleep(550+Math.min(850,String(reply.message).length*12));setTyping(false);
+          addMessage(conversation.id,reply.speakerId,String(reply.message).trim(),{source:"group-ai-fallback",seenByUser:true});
         }
       }
-
-      mergeGroupMemoryCandidates(
-        conversation.groupId,
-        result.groupMemoryCandidates
-      );
+      mergeGroupMemoryCandidates(conversation.groupId,result.groupMemoryCandidates);
       scheduleGroupProactive(conversation.groupId,"normal");
     }
   }catch(error){
     setTyping(false);
-    if(error?.code==="invalid_app_code"){
-      showToast("接続コードが違います。もう一度入力してください");
-      await askForAccessCode();
-    }else{
-      showToast("AIに接続できませんでした。少し待ってもう一度試してください");
-    }
-  }finally{
-    appState.isReplying=false;
-    autosizeInput();
+    if(error?.code==="invalid_app_code"){showToast("接続コードが違います。もう一度入力してください");await askForAccessCode();}
+    else{showToast("AIに接続できませんでした。少し待ってもう一度試してください");}
+  }finally{appState.isReplying=false;autosizeInput();}
+}
+
+async function sendUserMessage(){
+  const text=messageInput.value.trim();
+  if(appState.pendingImage){
+    const image=appState.pendingImage;
+    await sendUserPayload({text,messageType:"image",image});
+    return;
   }
+  await sendUserPayload({text,messageType:"text"});
+}
+
+async function sendStickerMessage(stickerId){
+  if(appState.isReplying)return;
+  closeStickerPanel();
+  await sendUserPayload({messageType:"sticker",stickerId});
 }
 
 
@@ -3875,9 +4209,17 @@ async function maybeSendGroupProactive(groupId){
 async function proactiveTick(){if(pushNotificationsEnabled())return;if(appState.proactiveBusy||document.visibilityState!=="visible")return;appState.proactiveBusy=true;try{const due=[];for(const id of Object.keys(CHARACTERS)){const s=loadDmProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"dm",id,due:s.nextDueAt});}for(const id of Object.keys(GROUPS)){const s=loadGroupProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"group",id,due:s.nextDueAt});}due.sort((a,b)=>a.due-b.due);const next=due[0];if(next){if(next.type==="dm")await maybeSendDmProactive(next.id);else await maybeSendGroupProactive(next.id);}}finally{appState.proactiveBusy=false;}}
 function startProactiveScheduler(){clearInterval(appState.proactiveTimer);setTimeout(proactiveTick,1500);appState.proactiveTimer=setInterval(proactiveTick,60*1000);document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")setTimeout(proactiveTick,700);});window.addEventListener("focus",()=>setTimeout(proactiveTick,700));}
 
-async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);removeDelayedDmForConversation(conversation.id);removeDelayedGroupForConversation(conversation.id);saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
+async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);removeDelayedDmForConversation(conversation.id);removeDelayedGroupForConversation(conversation.id);await deleteMediaForConversation(conversation.id);clearPendingImage();closeStickerPanel();saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
 
 composer.addEventListener("submit",e=>{e.preventDefault();sendUserMessage();});
+photoButton.addEventListener("click",()=>{closeStickerPanel();chatImageInput.click();});
+stickerButton.addEventListener("click",toggleStickerPanel);
+attachmentRemoveButton.addEventListener("click",clearPendingImage);
+chatImageInput.addEventListener("change",async()=>{
+  const file=chatImageInput.files?.[0];chatImageInput.value="";if(!file)return;
+  try{showToast("写真を準備しています…",1800);const prepared=await prepareChatImage(file);setPendingImage(prepared);}
+  catch(error){console.error(error);showToast("写真を読み込めませんでした");}
+});
 messageInput.addEventListener("input",autosizeInput);messageInput.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();composer.requestSubmit();}});
 backButton.addEventListener("click",()=>history.back());
 resetButton.addEventListener("click",()=>{const conversation=activeConversation();if(!conversation)return;if(conversation.type==="dm"){const c=characterById(conversation.characterId);resetTitle.textContent=`${getCharacterDisplayName(c.id)}とのトークを初期化`;resetMemoryLabel.textContent="このキャラクターの長期記憶も削除する";}else{resetTitle.textContent="グループトークを初期化";resetMemoryLabel.textContent="このグループの共有記憶も削除する";}resetDialog.showModal();});
@@ -3911,6 +4253,7 @@ window.addEventListener("popstate",e=>{
 function registerServiceWorker(){if(!("serviceWorker" in navigator))return;let reloading=false;navigator.serviceWorker.addEventListener("controllerchange",()=>{if(reloading)return;reloading=true;location.reload();});window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(r=>r.update()).catch(()=>{}));}
 
 migrateLegacyNatsukiData();
+renderStickerPanel();
 const initialChatMatch=location.hash.match(/^#chat=([^&]+)$/);
 const initialConversationId=initialChatMatch?decodeURIComponent(initialChatMatch[1]):"";
 history.replaceState({list:true},"",location.pathname+location.search);
