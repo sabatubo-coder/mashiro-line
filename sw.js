@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-4-realtime-rally-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-5-fixed-composer-schedule-v1";
 const ASSETS = [
   "./",
   "./index.html",
