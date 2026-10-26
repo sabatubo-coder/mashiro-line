@@ -1685,7 +1685,8 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.19-multi-message-sequence-v1";
+const AWAY_STATE_KEY = "mashiroLine.phase3_2_20.characterAway.v1";
+const PUSH_VERSION = "phase3.2.20-away-return-v1";
 const PROACTIVE_CONTINUITY_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
 const PROACTIVE_CONTINUITY_MAX_STAGES = 3;
 const PROACTIVE_CONTINUITY_START_CHANCE = Object.freeze({natsuki:0.20,shiki:0.16,ichi:0.20,bunji:0.11,sosuke:0.07});
@@ -2704,6 +2705,40 @@ function markIncomingSeen(conversationId,{force=false}={}){
 
 
 const PRESENCE_SUPPORTED_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
+const AWAY_SUPPORTED_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
+const AWAY_REASON_LABELS = Object.freeze({bath:"入浴中",meal:"食事中",outing:"外出中",study:"勉強・作業中",errand:"用事中",commute:"移動中",sleep:"就寝中"});
+function normalizeAwayEntryLocal(raw,characterId,now=Date.now()){
+  const source=raw&&typeof raw==="object"?raw:{};
+  const id=String(characterId||source.characterId||"");
+  const reason=String(source.reason||"");
+  const untilMs=Date.parse(String(source.until||""));
+  const startedMs=Date.parse(String(source.startedAt||""));
+  if(!AWAY_SUPPORTED_CHARACTERS.has(id)||!AWAY_REASON_LABELS[reason]||!Number.isFinite(untilMs)||untilMs<=now)return null;
+  return {characterId:id,reason,label:AWAY_REASON_LABELS[reason],startedAt:Number.isFinite(startedMs)?new Date(startedMs).toISOString():new Date(now).toISOString(),until:new Date(untilMs).toISOString(),updatedAt:String(source.updatedAt||source.startedAt||new Date(now).toISOString()),source:String(source.source||"explicit_message")};
+}
+function characterAwayForAPI(){
+  let raw={};try{raw=JSON.parse(localStorage.getItem(AWAY_STATE_KEY)||"{}")}catch{}
+  const out={};
+  for(const id of AWAY_SUPPORTED_CHARACTERS){const entry=normalizeAwayEntryLocal(raw?.[id],id);if(entry)out[id]=entry;}
+  const before=JSON.stringify(raw||{}),after=JSON.stringify(out);if(before!==after)localStorage.setItem(AWAY_STATE_KEY,after);
+  return out;
+}
+function activeCharacterAway(characterId){return characterAwayForAPI()[String(characterId||"")]||null;}
+function applyCharacterAwayUpdate(update){
+  if(!update||typeof update!=="object")return false;
+  const id=String(update.characterId||"");
+  const entry=normalizeAwayEntryLocal(update,id);
+  if(!entry)return false;
+  const map=characterAwayForAPI();map[id]=entry;localStorage.setItem(AWAY_STATE_KEY,JSON.stringify(map));
+  try{
+    const state=loadDmProactiveState(id);
+    const untilMs=Date.parse(entry.until);
+    if(Number.isFinite(untilMs)){state.nextDueAt=Math.max(Number(state.nextDueAt||0),untilMs+Math.round((5+Math.random()*20)*60*1000));saveDmProactiveState(id,state);}
+  }catch{}
+  schedulePushSync();
+  const conversation=activeConversation();if(conversation?.type==="dm"&&conversation.characterId===id&&!typingRow.classList.contains("visible"))setPresenceStatusText(entry.label);
+  return true;
+}
 
 function presenceSupportedConversation(conversation){
   return Boolean(
@@ -2824,6 +2859,9 @@ async function refreshPresenceStatus({force=false}={}){
 
   if(typingRow.classList.contains("visible"))return;
 
+  const explicitAway=activeCharacterAway(conversation.characterId);
+  if(explicitAway){setPresenceStatusText(explicitAway.label);return;}
+
   if(!presenceSupportedConversation(conversation)){
     setPresenceStatusText("オンライン");
     return;
@@ -2853,6 +2891,7 @@ async function refreshPresenceStatus({force=false}={}){
         body:JSON.stringify({
           characterId:conversation.characterId,
           timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+          characterAway:characterAwayForAPI(),
           latestActivityAt:
             latestCharacterLineActivityAt(
               conversation.characterId
@@ -3499,6 +3538,7 @@ function addMessage(conversationId,senderId,text,options={}){
 
   messages.push(message);
   saveConversationMessages(conversationId,messages);
+  if(senderId!=="mashiro"&&options?.awayUpdate)applyCharacterAwayUpdate(options.awayUpdate);
   if(senderId!=="mashiro"&&messageTypeOf(message)==="image")rememberCharacterSentImage(conversation,message);
 
   if(activeVisible){
@@ -3616,6 +3656,7 @@ function localDmActiveSessionPreview(conversation,userMessage){
 }
 
 function scheduleOptimisticDmRead(conversation,userMessage){
+  if(activeCharacterAway(conversation?.characterId))return null;
   const session=localDmActiveSessionPreview(conversation,userMessage);
   if(!session)return null;
 
@@ -3872,6 +3913,7 @@ async function processDelayedDmState(){
             appState.activeConversationId===item.conversationId&&
             !chatScreen.hidden&&
             document.visibilityState==="visible",
+          awayUpdate:item.awayUpdate||null,
           ...replyQuoteOptions(item.conversationId,item.replyTo)
         }
       );
@@ -3896,6 +3938,10 @@ function enqueueDelayedDmResult(conversation,userMessage,result){
 
   const state=loadDelayedDmState();
   const tokenBase=`${conversation.id}-${userMessage.id}`;
+  if(String(timing?.reason||"").startsWith("explicit_away_")){
+    state.reads=state.reads.filter(item=>item?.conversationId!==conversation.id);
+    state.replies=state.replies.filter(item=>item?.conversationId!==conversation.id);
+  }
   state.reads=state.reads.filter(item=>item?.token!==tokenBase);
   state.reads.push({token:tokenBase,conversationId:conversation.id,throughCreatedAt:userMessage.createdAt,readAt:timing.readAt});
   state.replies=state.replies.filter(item=>!String(item?.token||"").startsWith(`${tokenBase}-reply-`)&&item?.token!==tokenBase);
@@ -3926,6 +3972,7 @@ function enqueueDelayedDmResult(conversation,userMessage,result){
         typingDurationMs,typingStartAt,
         reaction:index===0&&hasReaction?{emoji:normalizeReactionEmoji(result.reaction.emoji),targetMessageId:String(result.reaction.targetMessageId||userMessage.id)}:null,
         reactionOnly:false,replyTo:index===0?(result?.replyTo||null):null,readAt:timing.readAt,replyAt,eventId,
+        awayUpdate:(scheduled?.awayUpdate||(Number(result?.awayUpdateSequenceIndex)===index?result?.awayUpdate:null)||null),
         localMessageId:eventId?`push-${eventId}`:`delayed-${tokenBase}-${index}`
       });
     }
@@ -4106,6 +4153,7 @@ async function processDelayedGroupState(){
             ?"scheduled-group-reply-local"
             :"delayed-group-reply-local",
           seenByUser:visible,
+          awayUpdate:item.awayUpdate||null,
           ...replyQuoteOptions(item.conversationId,item.replyTo)
         }
       );
@@ -4190,6 +4238,7 @@ function enqueueDelayedGroupResult(conversation,userMessage,result){
       readAt:timing.readAt||"",
       replyAt:timing.replyAt,
       eventId,
+      awayUpdate:reply?.scheduledReply?.awayUpdate||reply?.awayUpdate||null,
       localMessageId:eventId
         ?`push-${eventId}`
         :`delayed-group-${token}`
@@ -4290,7 +4339,7 @@ async function recentHistoryWithLatestImageForAPI(conversationId){
 
 async function fetchJsonWithRetry(endpoint,options,retries=1){let lastError;for(let attempt=0;attempt<=retries;attempt++){const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),60000);try{const response=await fetch(endpoint,{...options,signal:controller.signal,cache:"no-store"});const data=await response.json().catch(()=>({}));if(response.status===401){localStorage.removeItem(ACCESS_CODE_KEY);throw Object.assign(new Error("invalid_app_code"),{code:"invalid_app_code"});}if(!response.ok){const e=Object.assign(new Error(String(data?.error||`http_${response.status}`)),{code:[429,500,502,503,504].includes(response.status)?"temporary_error":response.status===403?"origin_not_allowed":"api_error"});throw e;}return data;}catch(error){lastError=error;const retryable=error?.name==="AbortError"||error instanceof TypeError||error?.code==="temporary_error";if(!retryable||attempt===retries)throw error;await sleep(1800);}finally{clearTimeout(timeout);}}throw lastError;}
 
-async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);const messages=await recentHistoryWithLatestImageForAPI(conversation.id);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages,memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,characterActivityAt:characterActivityAtForAPI(),deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true,clientVersion:PUSH_VERSION})});}
+async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);const messages=await recentHistoryWithLatestImageForAPI(conversation.id);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages,memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,characterActivityAt:characterActivityAtForAPI(),characterAway:characterAwayForAPI(),deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true,clientVersion:PUSH_VERSION})});}
 function privateMemoriesForGroup(group){const map={};for(const id of group.participants){if(id!=="mashiro"&&characterById(id))map[id]=memoriesForAPI(id);}return map;}
 async function callGroupChat(conversation,accessCode,apiEndpoint){
   const group=groupById(conversation.groupId);
@@ -4314,6 +4363,7 @@ async function callGroupChat(conversation,accessCode,apiEndpoint){
         ),
         timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
         characterActivityAt:characterActivityAtForAPI(),
+        characterAway:characterAwayForAPI(),
         deviceId:pushNotificationsEnabled()?getPushDeviceId():"",
         scheduleDelayedReply:true,
         clientVersion:PUSH_VERSION
@@ -4397,7 +4447,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
               if(gap>=1000)setTyping(true);
               await sleep(gap);setTyping(false);
             }
-            addMessage(conversation.id,conversation.characterId,part,{source:"ai",seenByUser:true,...(index===0?replyQuoteOptions(conversation.id,result?.replyTo):{})});
+            addMessage(conversation.id,conversation.characterId,part,{source:"ai",seenByUser:true,awayUpdate:Number(result?.awayUpdateSequenceIndex)===index?result?.awayUpdate:null,...(index===0?replyQuoteOptions(conversation.id,result?.replyTo):{})});
           }
         }
         scheduleDmProactive(conversation.characterId,"normal");
@@ -4423,7 +4473,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
           }else{
             setTyping(true,reply.speakerId);await sleep(replyTypingDurationMs(reply.message,{group:true}));setTyping(false);
           }
-          addMessage(conversation.id,reply.speakerId,String(reply.message).trim(),{source:"group-ai-fallback",seenByUser:true,...replyQuoteOptions(conversation.id,reply?.replyTo)});
+          addMessage(conversation.id,reply.speakerId,String(reply.message).trim(),{source:"group-ai-fallback",seenByUser:true,awayUpdate:reply?.awayUpdate||null,...replyQuoteOptions(conversation.id,reply?.replyTo)});
         }
       }
       mergeGroupMemoryCandidates(conversation.groupId,result.groupMemoryCandidates,{sourceType:"group",sourceConversationId:conversation.id});
@@ -4548,7 +4598,7 @@ function buildPushSnapshot(){
     };
   }
 
-  return {version:PUSH_VERSION,ui:pushUiLabels(),scopes:{dm,group}};
+  return {version:PUSH_VERSION,ui:pushUiLabels(),characterAway:characterAwayForAPI(),scopes:{dm,group}};
 }
 
 async function currentPushSubscription(){
@@ -4750,7 +4800,8 @@ async function sendForcedGroupAutonomousTest(){
         String(reply.message).trim(),
         {
           source:"group-autonomous-test",
-          seenByUser:false
+          seenByUser:false,
+          awayUpdate:reply?.awayUpdate||null
         }
       );
     }
@@ -5329,6 +5380,7 @@ async function pullPendingPushMessages(){
           mediaWidth:isImage&&generatedImageId?1024:0,
           mediaHeight:isImage&&generatedImageId?1024:0,
           mediaSummary:isImage?String(event?.meta?.mediaSummary||"").slice(0,300):"",
+          awayUpdate:event?.meta?.awayUpdate||null,
           seenByUser:appState.activeConversationId===conversation.id&&!chatScreen.hidden&&document.visibilityState==="visible",
           ...replyQuoteOptions(conversation.id,{messageId:event?.meta?.replyToMessageId,senderId:event?.meta?.replyToSenderId,excerpt:event?.meta?.replyToText})
         });
@@ -5696,6 +5748,7 @@ async function callDmProactive(
           Intl.DateTimeFormat()
             .resolvedOptions()
             .timeZone,
+        characterAway:characterAwayForAPI(),
         proactiveContext:{
           messagesToday:state.dailyCount,
           lastUserActivityAt:
@@ -5740,6 +5793,13 @@ async function maybeSendDmProactive(characterId){
   const state=loadDmProactiveState(characterId);
 
   if(Date.now()<state.nextDueAt)return;
+
+  const explicitAway=activeCharacterAway(characterId);
+  if(explicitAway){
+    const untilMs=Date.parse(explicitAway.until);
+    if(Number.isFinite(untilMs)){state.nextDueAt=Math.max(state.nextDueAt,untilMs+Math.round((5+Math.random()*20)*60*1000));saveDmProactiveState(characterId,state);}
+    return;
+  }
 
   if(isQuietTime()){
     scheduleDmProactive(characterId);
@@ -5817,7 +5877,8 @@ async function maybeSendDmProactive(characterId){
             source:"proactive",
             seenByUser:show,
             messageType:item.type==="sticker"?"sticker":"text",
-            stickerId:item.type==="sticker"?item.stickerId:""
+            stickerId:item.type==="sticker"?item.stickerId:"",
+            awayUpdate:(i===proactivePlan.length-1?result?.awayUpdate:null)
           }
         );
       }
@@ -5870,6 +5931,7 @@ async function callGroupProactive(groupId,accessCode,apiEndpoint,extraContext={}
       sharedMemories:groupMemoriesForAPI(groupId),
       currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),
       timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+      characterAway:characterAwayForAPI(),
       proactiveContext:{
         messagesToday:state.dailyCount,
         lastActivityAt:latestMessage(g.conversationId)?.createdAt||null,
@@ -6021,7 +6083,8 @@ async function maybeSendGroupProactive(groupId){
         String(reply.message).trim(),
         {
           source:"group-autonomous",
-          seenByUser:show
+          seenByUser:show,
+          awayUpdate:reply?.awayUpdate||null
         }
       );
       const autonomousStickerId=normalizeStickerId(reply?.stickerId);
