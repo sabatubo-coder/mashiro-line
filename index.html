@@ -1686,7 +1686,8 @@ const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
 const AWAY_STATE_KEY = "mashiroLine.phase3_2_20.characterAway.v1";
-const PUSH_VERSION = "phase3.2.20-away-return-v1";
+const CONVERSATION_REST_KEY = "mashiroLine.phase3_2_21.conversationRest.v1";
+const PUSH_VERSION = "phase3.2.21-natural-conversation-end-resume-v1";
 const PROACTIVE_CONTINUITY_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
 const PROACTIVE_CONTINUITY_MAX_STAGES = 3;
 const PROACTIVE_CONTINUITY_START_CHANCE = Object.freeze({natsuki:0.20,shiki:0.16,ichi:0.20,bunji:0.11,sosuke:0.07});
@@ -2739,6 +2740,47 @@ function applyCharacterAwayUpdate(update){
   const conversation=activeConversation();if(conversation?.type==="dm"&&conversation.characterId===id&&!typingRow.classList.contains("visible"))setPresenceStatusText(entry.label);
   return true;
 }
+
+function normalizeConversationRestLocal(raw,conversationId,now=Date.now()){
+  const source=raw&&typeof raw==="object"?raw:{};
+  const id=String(conversationId||source.conversationId||"");if(!id)return null;
+  const status=String(source.status||"settled")==="active"?"active":"settled";
+  const updatedMs=Date.parse(String(source.updatedAt||source.startedAt||""));
+  if(status==="active"){
+    const at=Number.isFinite(updatedMs)?updatedMs:now;if(now-at>48*60*60*1000)return null;
+    return{conversationId:id,status:"active",startedAt:String(source.startedAt||new Date(at).toISOString()),suppressUntil:"",resumeDueAt:"",resumePlanned:false,resumeHint:"",updatedAt:new Date(at).toISOString(),source:String(source.source||"user_resume")};
+  }
+  const suppressMs=Date.parse(String(source.suppressUntil||"")),resumeMs=Date.parse(String(source.resumeDueAt||""));
+  const keepUntil=Math.max(Number.isFinite(suppressMs)?suppressMs:0,Number.isFinite(resumeMs)?resumeMs+12*60*60*1000:0);
+  if(!keepUntil||keepUntil<now-6*60*60*1000)return null;
+  return{conversationId:id,status:"settled",startedAt:String(source.startedAt||new Date(now).toISOString()),suppressUntil:Number.isFinite(suppressMs)?new Date(suppressMs).toISOString():"",resumeDueAt:Number.isFinite(resumeMs)?new Date(resumeMs).toISOString():"",resumePlanned:Boolean(source.resumePlanned&&Number.isFinite(resumeMs)),resumeHint:String(source.resumeHint||"").slice(0,180),updatedAt:Number.isFinite(updatedMs)?new Date(updatedMs).toISOString():new Date(now).toISOString(),source:String(source.source||"natural_end")};
+}
+function conversationRestForAPI(){
+  let raw={};try{raw=JSON.parse(localStorage.getItem(CONVERSATION_REST_KEY)||"{}")}catch{}
+  const out={};for(const [id,value] of Object.entries(raw||{})){const entry=normalizeConversationRestLocal(value,id);if(entry)out[id]=entry;}
+  if(JSON.stringify(raw||{})!==JSON.stringify(out))localStorage.setItem(CONVERSATION_REST_KEY,JSON.stringify(out));return out;
+}
+function activeConversationRest(conversationId){const e=conversationRestForAPI()[String(conversationId||"")]||null;return e?.status==="settled"?e:null;}
+function saveConversationRestMap(map){localStorage.setItem(CONVERSATION_REST_KEY,JSON.stringify(map||{}));schedulePushSync();}
+function applyConversationRestUpdate(update){
+  if(!update||typeof update!=="object")return false;const id=String(update.conversationId||"");if(!id)return false;
+  const entry=normalizeConversationRestLocal(update,id);if(!entry)return false;const map=conversationRestForAPI();const old=map[id];const oldMs=Date.parse(String(old?.updatedAt||"")),newMs=Date.parse(String(entry.updatedAt||""));if(old&&Number.isFinite(oldMs)&&Number.isFinite(newMs)&&newMs<oldMs)return false;map[id]=entry;saveConversationRestMap(map);
+  try{
+    const conversation=conversationById(id);const untilMs=Date.parse(String(entry.suppressUntil||""));const resumeMs=Date.parse(String(entry.resumeDueAt||""));
+    if(conversation?.type==="dm"){
+      const state=loadDmProactiveState(conversation.characterId);const due=entry.resumePlanned&&Number.isFinite(resumeMs)?resumeMs:untilMs;
+      if(Number.isFinite(due))state.nextDueAt=Math.max(Date.now()+1000,due);saveDmProactiveState(conversation.characterId,state);
+    }else if(conversation?.type==="group"){
+      const state=loadGroupProactiveState(conversation.groupId);const due=entry.resumePlanned&&Number.isFinite(resumeMs)?resumeMs:untilMs;
+      if(Number.isFinite(due))state.nextDueAt=Math.max(Date.now()+1000,due);saveGroupProactiveState(conversation.groupId,state);
+    }
+  }catch{}
+  return true;
+}
+function clearConversationRest(conversationId,source="user_resume"){
+  const id=String(conversationId||"");if(!id)return;const map=conversationRestForAPI();map[id]={conversationId:id,status:"active",startedAt:new Date().toISOString(),updatedAt:new Date().toISOString(),source};saveConversationRestMap(map);
+}
+function naturalRestSuppressing(conversationId){const e=activeConversationRest(conversationId);const until=Date.parse(String(e?.suppressUntil||""));return Boolean(e&&Number.isFinite(until)&&until>Date.now());}
 
 function presenceSupportedConversation(conversation){
   return Boolean(
@@ -3859,6 +3901,7 @@ async function processDelayedDmState(){
         item.throughCreatedAt,
         item.readAt
       );
+      if(item.conversationRestUpdate)applyConversationRestUpdate(item.conversationRestUpdate);
       changed=true;
     }else remainingReads.push(item);
   }
@@ -3919,6 +3962,7 @@ async function processDelayedDmState(){
       );
     }
 
+    if(item.conversationRestUpdate)applyConversationRestUpdate(item.conversationRestUpdate);
     if(item.eventId)ackDelayedReplyEvent(item.eventId);
     changed=true;
   }
@@ -3934,7 +3978,8 @@ function enqueueDelayedDmResult(conversation,userMessage,result){
   const hasReaction=Boolean(normalizeReactionEmoji(result?.reaction?.emoji));
   const sequence=(Array.isArray(result?.replySequence)?result.replySequence:[]).map(v=>String(v||"").trim()).filter(Boolean).slice(0,3);
   if(!sequence.length&&String(result?.reply||"").trim()&&result?.reactionOnly!==true)sequence.push(String(result.reply).trim());
-  if(!timing?.readAt||!timing?.replyAt||(!sequence.length&&!hasReaction))return false;
+  const readOnly=result?.readOnly===true;
+  if(!timing?.readAt||!timing?.replyAt||(!sequence.length&&!hasReaction&&!readOnly))return false;
 
   const state=loadDelayedDmState();
   const tokenBase=`${conversation.id}-${userMessage.id}`;
@@ -3943,7 +3988,7 @@ function enqueueDelayedDmResult(conversation,userMessage,result){
     state.replies=state.replies.filter(item=>item?.conversationId!==conversation.id);
   }
   state.reads=state.reads.filter(item=>item?.token!==tokenBase);
-  state.reads.push({token:tokenBase,conversationId:conversation.id,throughCreatedAt:userMessage.createdAt,readAt:timing.readAt});
+  state.reads.push({token:tokenBase,conversationId:conversation.id,throughCreatedAt:userMessage.createdAt,readAt:timing.readAt,conversationRestUpdate:readOnly?(result?.conversationRestUpdate||null):null});
   state.replies=state.replies.filter(item=>!String(item?.token||"").startsWith(`${tokenBase}-reply-`)&&item?.token!==tokenBase);
 
   const sequenceTimings=Array.isArray(result?.replySequenceTimings)?result.replySequenceTimings:[];
@@ -3953,7 +3998,7 @@ function enqueueDelayedDmResult(conversation,userMessage,result){
     state.replies.push({
       token:tokenBase,conversationId:conversation.id,characterId:conversation.characterId,reply:"",typingDurationMs:0,typingStartAt:"",
       reaction:hasReaction?{emoji:normalizeReactionEmoji(result.reaction.emoji),targetMessageId:String(result.reaction.targetMessageId||userMessage.id)}:null,
-      reactionOnly:true,replyTo:null,readAt:timing.readAt,replyAt:timing.replyAt,eventId,localMessageId:eventId?`push-${eventId}`:`delayed-${tokenBase}`
+      reactionOnly:true,replyTo:null,readAt:timing.readAt,replyAt:timing.replyAt,eventId,conversationRestUpdate:result?.conversationRestUpdate||null,localMessageId:eventId?`push-${eventId}`:`delayed-${tokenBase}`
     });
   }else{
     for(let index=0;index<sequence.length;index+=1){
@@ -3973,6 +4018,7 @@ function enqueueDelayedDmResult(conversation,userMessage,result){
         reaction:index===0&&hasReaction?{emoji:normalizeReactionEmoji(result.reaction.emoji),targetMessageId:String(result.reaction.targetMessageId||userMessage.id)}:null,
         reactionOnly:false,replyTo:index===0?(result?.replyTo||null):null,readAt:timing.readAt,replyAt,eventId,
         awayUpdate:(scheduled?.awayUpdate||(Number(result?.awayUpdateSequenceIndex)===index?result?.awayUpdate:null)||null),
+        conversationRestUpdate:index===sequence.length-1?(result?.conversationRestUpdate||null):null,
         localMessageId:eventId?`push-${eventId}`:`delayed-${tokenBase}-${index}`
       });
     }
@@ -4159,6 +4205,7 @@ async function processDelayedGroupState(){
       );
     }
 
+    if(item.conversationRestUpdate)applyConversationRestUpdate(item.conversationRestUpdate);
     if(item.eventId)ackDelayedReplyEvent(item.eventId);
     changed=true;
   }
@@ -4239,6 +4286,7 @@ function enqueueDelayedGroupResult(conversation,userMessage,result){
       replyAt:timing.replyAt,
       eventId,
       awayUpdate:reply?.scheduledReply?.awayUpdate||reply?.awayUpdate||null,
+      conversationRestUpdate:reply?.conversationRestUpdate||(index===replies.length-1?result?.conversationRestUpdate:null),
       localMessageId:eventId
         ?`push-${eventId}`
         :`delayed-group-${token}`
@@ -4339,7 +4387,7 @@ async function recentHistoryWithLatestImageForAPI(conversationId){
 
 async function fetchJsonWithRetry(endpoint,options,retries=1){let lastError;for(let attempt=0;attempt<=retries;attempt++){const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),60000);try{const response=await fetch(endpoint,{...options,signal:controller.signal,cache:"no-store"});const data=await response.json().catch(()=>({}));if(response.status===401){localStorage.removeItem(ACCESS_CODE_KEY);throw Object.assign(new Error("invalid_app_code"),{code:"invalid_app_code"});}if(!response.ok){const e=Object.assign(new Error(String(data?.error||`http_${response.status}`)),{code:[429,500,502,503,504].includes(response.status)?"temporary_error":response.status===403?"origin_not_allowed":"api_error"});throw e;}return data;}catch(error){lastError=error;const retryable=error?.name==="AbortError"||error instanceof TypeError||error?.code==="temporary_error";if(!retryable||attempt===retries)throw error;await sleep(1800);}finally{clearTimeout(timeout);}}throw lastError;}
 
-async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);const messages=await recentHistoryWithLatestImageForAPI(conversation.id);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages,memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,characterActivityAt:characterActivityAtForAPI(),characterAway:characterAwayForAPI(),deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true,clientVersion:PUSH_VERSION})});}
+async function callDmChat(conversation,accessCode,apiEndpoint){const c=characterById(conversation.characterId);const messages=await recentHistoryWithLatestImageForAPI(conversation.id);return fetchJsonWithRetry(apiEndpoint,{method:"POST",headers:{"Content-Type":"application/json","X-App-Code":accessCode},body:JSON.stringify({characterId:c.id,conversationId:conversation.id,messages,memories:memoriesForAPI(c.id),currentTime:new Date().toLocaleString("ja-JP",{dateStyle:"full",timeStyle:"short"}),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,characterActivityAt:characterActivityAtForAPI(),characterAway:characterAwayForAPI(),conversationRest:conversationRestForAPI(),deviceId:pushNotificationsEnabled()?getPushDeviceId():"",scheduleDelayedReply:true,clientVersion:PUSH_VERSION})});}
 function privateMemoriesForGroup(group){const map={};for(const id of group.participants){if(id!=="mashiro"&&characterById(id))map[id]=memoriesForAPI(id);}return map;}
 async function callGroupChat(conversation,accessCode,apiEndpoint){
   const group=groupById(conversation.groupId);
@@ -4364,6 +4412,7 @@ async function callGroupChat(conversation,accessCode,apiEndpoint){
         timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
         characterActivityAt:characterActivityAtForAPI(),
         characterAway:characterAwayForAPI(),
+        conversationRest:conversationRestForAPI(),
         deviceId:pushNotificationsEnabled()?getPushDeviceId():"",
         scheduleDelayedReply:true,
         clientVersion:PUSH_VERSION
@@ -4396,6 +4445,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
     }catch(error){console.error(error);showToast("写真を保存できませんでした");return;}
   }
 
+  clearConversationRest(conversation.id,"user_message_resume");
   const storedText=messageType==="sticker"?stickerToken(stickerId):cleanText;
   const replyOptions=pendingReplyOptions(conversation.id);
   const userMessage=addMessage(conversation.id,"mashiro",storedText,{
@@ -4435,7 +4485,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
       }else{
         await sleep(350);markOutgoingReadThrough(conversation.id,userMessage.createdAt);
         applyBackendReaction(conversation,result,userMessage.id);
-        if(!result?.reactionOnly&&String(result?.reply||"").trim()){
+        if(!result?.reactionOnly&&!result?.readOnly&&String(result?.reply||"").trim()){
           const sequence=(Array.isArray(result?.replySequence)?result.replySequence:[]).map(v=>String(v||"").trim()).filter(Boolean).slice(0,3);
           if(!sequence.length)sequence.push(String(result.reply||"").trim());
           const timings=Array.isArray(result?.replySequenceTimings)?result.replySequenceTimings:[];
@@ -4451,6 +4501,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
           }
         }
         scheduleDmProactive(conversation.characterId,"normal");
+        if(result?.conversationRestUpdate)applyConversationRestUpdate(result.conversationRestUpdate);
       }
     }else{
       await cancelPendingGroupAutonomous(conversation.groupId);
@@ -4458,7 +4509,8 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
       const result=await callGroupChat(conversation,accessCode,apiEndpoint);
       if(result?.mediaSummary)updateMessageMediaSummary(conversation.id,userMessage.id,result.mediaSummary);
 
-      if(result?.groupTiming&&enqueueDelayedGroupResult(conversation,userMessage,result)){
+      const groupDelayedQueued=Boolean(result?.groupTiming&&enqueueDelayedGroupResult(conversation,userMessage,result));
+      if(groupDelayedQueued){
         // 既読・返信は各キャラの生活モデル時刻に従う。
       }else{
         await sleep(350);markOutgoingRead(conversation.id);
@@ -4479,6 +4531,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
       mergeGroupMemoryCandidates(conversation.groupId,result.groupMemoryCandidates,{sourceType:"group",sourceConversationId:conversation.id});
       propagateGroupMemoryCandidatesToParticipants(groupById(conversation.groupId),result.groupMemoryCandidates);
       scheduleGroupProactive(conversation.groupId,"normal");
+      if(!groupDelayedQueued&&result?.conversationRestUpdate)applyConversationRestUpdate(result.conversationRestUpdate);
     }
   }catch(error){
     setTyping(false);
@@ -4598,7 +4651,7 @@ function buildPushSnapshot(){
     };
   }
 
-  return {version:PUSH_VERSION,ui:pushUiLabels(),characterAway:characterAwayForAPI(),scopes:{dm,group}};
+  return {version:PUSH_VERSION,ui:pushUiLabels(),characterAway:characterAwayForAPI(),conversationRest:conversationRestForAPI(),scopes:{dm,group}};
 }
 
 async function currentPushSubscription(){
@@ -5385,6 +5438,7 @@ async function pullPendingPushMessages(){
           ...replyQuoteOptions(conversation.id,{messageId:event?.meta?.replyToMessageId,senderId:event?.meta?.replyToSenderId,excerpt:event?.meta?.replyToText})
         });
       }
+      if(event?.meta?.conversationRestUpdate)applyConversationRestUpdate(event.meta.conversationRestUpdate);
       if(conversation.type==="dm"&&event?.meta?.followUpMemoryKey&&characterById(event.speakerId)){
         markFollowUpMemoryRecovered(event.speakerId,event.meta.followUpMemoryKey);
       }
@@ -5766,6 +5820,7 @@ async function callDmProactive(
           activeContinuityEvent:normalizeDmContinuityEvent(state.activeContinuityEvent),
           continuityEventDue:dmContinuityDue(state),
           continuityStartAllowed:dmContinuityStartAllowed(characterId,state),
+          conversationRest:activeConversationRest(conv.id),
           clientVersion:PUSH_VERSION
         }
       })
@@ -5794,6 +5849,11 @@ async function maybeSendDmProactive(characterId){
 
   if(Date.now()<state.nextDueAt)return;
 
+  const naturalRest=activeConversationRest(conv.id);
+  const restUntil=Date.parse(String(naturalRest?.suppressUntil||""));
+  const continuityDueEarly=dmContinuityDue(state);
+  if(!continuityDueEarly&&naturalRest&&Number.isFinite(restUntil)&&restUntil>Date.now()){state.nextDueAt=Math.max(Number(state.nextDueAt||0),restUntil);saveDmProactiveState(characterId,state);return;}
+
   const explicitAway=activeCharacterAway(characterId);
   if(explicitAway){
     const untilMs=Date.parse(explicitAway.until);
@@ -5806,7 +5866,7 @@ async function maybeSendDmProactive(characterId){
     return;
   }
 
-  const continuationDue=dmContinuityDue(state);
+  const continuationDue=continuityDueEarly;
   if(!continuationDue&&state.dailyCount>=c.proactive.dailyMax){
     state.nextDueAt=nextMorningTimestamp();
     saveDmProactiveState(characterId,state);
@@ -5905,6 +5965,7 @@ async function maybeSendDmProactive(characterId){
         }
       ].slice(-12);
 
+      if(activeConversationRest(conv.id))clearConversationRest(conv.id,"proactive_resume_sent");
       saveDmProactiveState(characterId,state);
       if(!continuityTransition.active)scheduleDmProactive(characterId);
     }else{
@@ -5935,6 +5996,7 @@ async function callGroupProactive(groupId,accessCode,apiEndpoint,extraContext={}
       proactiveContext:{
         messagesToday:state.dailyCount,
         lastActivityAt:latestMessage(g.conversationId)?.createdAt||null,
+        conversationRest:activeConversationRest(g.conversationId),
         clientVersion:PUSH_VERSION,
         ...extraContext
       }
@@ -6005,6 +6067,9 @@ async function maybeSendGroupProactive(groupId){
 
   const g=groupById(groupId),state=loadGroupProactiveState(groupId);
   if(Date.now()<state.nextDueAt)return;
+  const naturalRest=activeConversationRest(g.conversationId);
+  const restUntil=Date.parse(String(naturalRest?.suppressUntil||""));
+  if(naturalRest&&Number.isFinite(restUntil)&&restUntil>Date.now()){state.nextDueAt=Math.max(Number(state.nextDueAt||0),restUntil);saveGroupProactiveState(groupId,state);return;}
   if(isQuietTime()){scheduleGroupProactive(groupId);return;}
   if(state.dailyCount>=g.proactive.dailyMax){
     state.nextDueAt=nextMorningTimestamp();
@@ -6103,6 +6168,7 @@ async function maybeSendGroupProactive(groupId){
     if(sentCount>0){
       state.lastSentAt=Date.now();
       state.dailyCount+=1;
+      if(activeConversationRest(g.conversationId))clearConversationRest(g.conversationId,"group_proactive_resume_sent");
       saveGroupProactiveState(groupId,state);
       scheduleGroupProactive(groupId);
     }else{
@@ -6117,7 +6183,7 @@ async function maybeSendGroupProactive(groupId){
 async function proactiveTick(){if(pushNotificationsEnabled())return;if(appState.proactiveBusy||document.visibilityState!=="visible")return;appState.proactiveBusy=true;try{const due=[];for(const id of Object.keys(CHARACTERS)){const s=loadDmProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"dm",id,due:s.nextDueAt});}for(const id of Object.keys(GROUPS)){const s=loadGroupProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"group",id,due:s.nextDueAt});}due.sort((a,b)=>a.due-b.due);const next=due[0];if(next){if(next.type==="dm")await maybeSendDmProactive(next.id);else await maybeSendGroupProactive(next.id);}}finally{appState.proactiveBusy=false;}}
 function startProactiveScheduler(){clearInterval(appState.proactiveTimer);setTimeout(proactiveTick,1500);appState.proactiveTimer=setInterval(proactiveTick,60*1000);document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")setTimeout(proactiveTick,700);});window.addEventListener("focus",()=>setTimeout(proactiveTick,700));}
 
-async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);removeDelayedDmForConversation(conversation.id);removeDelayedGroupForConversation(conversation.id);await deleteMediaForConversation(conversation.id);clearPendingImage();clearPendingReply();closeStickerPanel();saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
+async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);removeDelayedDmForConversation(conversation.id);removeDelayedGroupForConversation(conversation.id);clearConversationRest(conversation.id,"conversation_reset");await deleteMediaForConversation(conversation.id);clearPendingImage();clearPendingReply();closeStickerPanel();saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
 
 // Phase 3.2.17: incoming message long-press actions.
 let messageLongPressState=null;

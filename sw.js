@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-20-away-return-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-21-natural-conversation-end-resume-v1";
 const ASSETS = [
   "./",
   "./index.html",
