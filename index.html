@@ -1553,7 +1553,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.15b-typing-reply-timing-link-v1";
+const PUSH_VERSION = "phase3.2.16-generated-proactive-images-v1";
 const PROACTIVE_CONTINUITY_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
 const PROACTIVE_CONTINUITY_MAX_STAGES = 3;
 const PROACTIVE_CONTINUITY_START_CHANCE = Object.freeze({natsuki:0.20,shiki:0.16,ichi:0.20,bunji:0.11,sosuke:0.07});
@@ -1818,7 +1818,7 @@ function applyBackendReaction(conversation,result,fallbackTargetMessageId=""){
   return addReactionToMessage(conversation.id,targetMessageId,reactorId,emoji,reaction?.createdAt||"");
 }
 function messageTypeOf(message){
-  if(message?.messageType==="image"||proactiveImageAsset(message?.imageAssetId))return "image";
+  if(message?.messageType==="image"||message?.generatedImageId||proactiveImageAsset(message?.imageAssetId))return "image";
   if(message?.messageType==="sticker"||normalizeStickerId(message?.stickerId)||stickerIdFromText(message?.text))return "sticker";
   return "text";
 }
@@ -1945,14 +1945,52 @@ function renderStickerPanel(){
   }
 }
 
+function generatedImageCacheKey(id){return id?`generated:${String(id)}`:"";}
+function generatedImageEndpoint(apiEndpoint,id){
+  const base=String(apiEndpoint||"").replace(/\/api\/chat(?:\?.*)?$/,"/").replace(/\/$/,"");
+  return `${base}/api/generated-image/${encodeURIComponent(String(id||""))}`;
+}
+async function fetchGeneratedImageBlob(id){
+  const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
+  if(!apiEndpoint||!accessCode||!id)throw new Error("generated_image_unavailable");
+  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),60000);
+  try{
+    const response=await fetch(generatedImageEndpoint(apiEndpoint,id),{method:"GET",headers:{"X-App-Code":accessCode},signal:controller.signal,cache:"force-cache"});
+    if(!response.ok)throw new Error(`generated_image_http_${response.status}`);
+    const blob=await response.blob();if(!String(blob.type||"").startsWith("image/")||blob.size<1000)throw new Error("generated_image_invalid");
+    return blob;
+  }finally{clearTimeout(timeout);}
+}
+function renderBlobIntoImageContainer(container,blob){
+  const img=document.createElement("img");const url=URL.createObjectURL(blob);img.src=url;img.alt="送信された写真";img.loading="lazy";
+  img.onload=()=>{setTimeout(()=>URL.revokeObjectURL(url),1500);scheduleMessageScrollSettle();};
+  img.onerror=()=>{URL.revokeObjectURL(url);container.classList.add("media-image-missing");container.textContent="写真";};
+  container.replaceChildren(img);
+}
 async function hydrateMessageImage(container,message){
+  const generatedImageId=String(message?.generatedImageId||"").trim();
   const builtIn=proactiveImageAsset(message?.imageAssetId);
-  if(builtIn){
+  if(generatedImageId){
+    const cacheKey=generatedImageCacheKey(generatedImageId);
+    try{
+      let record=await getMediaRecord(cacheKey);
+      if(!record?.blob){
+        const blob=await fetchGeneratedImageBlob(generatedImageId);
+        await putMediaRecord({id:cacheKey,conversationId:appState.activeConversationId||"generated",blob,mime:blob.type||"image/jpeg",width:Number(message?.mediaWidth||1024),height:Number(message?.mediaHeight||1024),createdAt:message?.createdAt||new Date().toISOString(),source:"generated-character-image"});
+        record={blob};
+      }
+      renderBlobIntoImageContainer(container,record.blob);return;
+    }catch{}
+    // 生成画像の取得に失敗した場合だけ、内容が対応する固定画像へフォールバック。
+    if(builtIn){
+      const img=document.createElement("img");img.src=builtIn.src;img.alt=builtIn.alt||"送信された写真";img.loading="lazy";img.onload=()=>scheduleMessageScrollSettle();img.onerror=()=>{container.classList.add("media-image-missing");container.textContent="写真";};container.replaceChildren(img);return;
+    }
+  }else if(builtIn){
     const img=document.createElement("img");img.src=builtIn.src;img.alt=builtIn.alt||"送信された写真";img.loading="lazy";img.onload=()=>scheduleMessageScrollSettle();img.onerror=()=>{container.classList.add("media-image-missing");container.textContent="写真";};container.replaceChildren(img);return;
   }
   try{
     const record=await getMediaRecord(message.mediaId);if(!record?.blob)throw new Error("missing");
-    const img=document.createElement("img");const url=URL.createObjectURL(record.blob);img.src=url;img.alt="送信された写真";img.onload=()=>{setTimeout(()=>URL.revokeObjectURL(url),1500);scheduleMessageScrollSettle();};container.replaceChildren(img);
+    renderBlobIntoImageContainer(container,record.blob);
   }catch{container.classList.add("media-image-missing");container.textContent="写真";}
 }
 
@@ -2189,7 +2227,7 @@ function characterImageMemoryCandidate(conversation,message){
   const caption=String(message.text||"").trim().replace(/\s+/g," ").slice(0,100);
   const createdAt=message.createdAt||new Date().toISOString();
   const minute=Math.floor((Date.parse(createdAt)||Date.now())/60000);
-  const assetKey=String(message.imageAssetId||"photo").toLowerCase().replace(/[^a-z0-9_]+/g,"_").slice(0,40)||"photo";
+  const assetKey=String(message.generatedImageId||message.imageAssetId||"photo").toLowerCase().replace(/[^a-z0-9_]+/g,"_").slice(0,40)||"photo";
   const scopeLabel=conversation.type==="group"?`グループ「${getGroupName(conversation.groupId)}」`:`ましろとの個別LINE`;
   const text=`${imageMemoryDateLabel(createdAt)}ごろ、${sender.displayName}が${scopeLabel}に「${summary}」の写真を送った。ましろもその写真を見ている。${caption?`添え文は「${caption}」。`:""}`;
   return{
@@ -2945,8 +2983,8 @@ function renderMessages(options={}){
       contentNode=document.createElement("div");contentNode.className="media-message";
       const imageHolder=document.createElement("div");imageHolder.className="media-image-holder";
       const builtInAsset=proactiveImageAsset(message.imageAssetId);
-      const mediaWidth=Number(message.mediaWidth||builtInAsset?.width||0);
-      const mediaHeight=Number(message.mediaHeight||builtInAsset?.height||0);
+      const mediaWidth=Number(message.mediaWidth||(message.generatedImageId?1024:0)||builtInAsset?.width||0);
+      const mediaHeight=Number(message.mediaHeight||(message.generatedImageId?1024:0)||builtInAsset?.height||0);
       if(mediaWidth>0&&mediaHeight>0){imageHolder.style.aspectRatio=`${mediaWidth} / ${mediaHeight}`;}
       imageHolder.textContent="写真を読み込み中…";contentNode.appendChild(imageHolder);hydrateMessageImage(imageHolder,message);
       if(String(message.text||"").trim()){
@@ -3192,6 +3230,7 @@ function addMessage(conversationId,senderId,text,options={}){
     stickerId:normalizeStickerId(options.stickerId)||stickerIdFromText(text)||"",
     mediaId:String(options.mediaId||""),
     imageAssetId:String(options.imageAssetId||""),
+    generatedImageId:String(options.generatedImageId||""),
     mediaMime:String(options.mediaMime||""),
     mediaWidth:Number(options.mediaWidth||0)||0,
     mediaHeight:Number(options.mediaHeight||0)||0,
@@ -3982,6 +4021,7 @@ function recentHistoryForAPI(conversationId){return loadConversationMessages(con
   messageType:messageTypeOf(m),
   stickerId:messageStickerId(m),
   imageAssetId:String(m.imageAssetId||"").slice(0,80),
+  generatedImageId:String(m.generatedImageId||"").slice(0,120),
   mediaSummary:String(m.mediaSummary||"").slice(0,300),
   replyToId:String(m.replyToId||""),
   reactions:normalizeMessageReactions(m.reactions)
@@ -4998,7 +5038,8 @@ async function pullPendingPushMessages(){
     for(const event of events){
       const conversation=conversationById(event?.conversationId);
       const imageAssetId=String(event?.meta?.imageAssetId||"").trim();
-      const isImage=event?.meta?.messageType==="image"&&Boolean(proactiveImageAsset(imageAssetId));
+      const generatedImageId=String(event?.meta?.generatedImageId||"").trim();
+      const isImage=event?.meta?.messageType==="image"&&Boolean(generatedImageId||proactiveImageAsset(imageAssetId));
       const pushStickerId=normalizeStickerId(event?.meta?.stickerId)||stickerIdFromText(event?.message);
       const isSticker=event?.meta?.messageType==="sticker"&&Boolean(pushStickerId);
       const reactionEmoji=normalizeReactionEmoji(event?.meta?.reactionEmoji);
@@ -5019,6 +5060,9 @@ async function pullPendingPushMessages(){
           messageType:isImage?"image":isSticker?"sticker":"text",
           stickerId:isSticker?pushStickerId:"",
           imageAssetId:isImage?imageAssetId:"",
+          generatedImageId:isImage?generatedImageId:"",
+          mediaWidth:isImage&&generatedImageId?1024:0,
+          mediaHeight:isImage&&generatedImageId?1024:0,
           mediaSummary:isImage?String(event?.meta?.mediaSummary||"").slice(0,300):"",
           seenByUser:appState.activeConversationId===conversation.id&&!chatScreen.hidden&&document.visibilityState==="visible",
           ...replyQuoteOptions(conversation.id,{messageId:event?.meta?.replyToMessageId,senderId:event?.meta?.replyToSenderId,excerpt:event?.meta?.replyToText})
