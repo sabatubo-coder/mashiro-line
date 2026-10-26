@@ -1685,7 +1685,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.17-user-reaction-quote-reply-v1";
+const PUSH_VERSION = "phase3.2.19-multi-message-sequence-v1";
 const PROACTIVE_CONTINUITY_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
 const PROACTIVE_CONTINUITY_MAX_STAGES = 3;
 const PROACTIVE_CONTINUITY_START_CHANCE = Object.freeze({natsuki:0.20,shiki:0.16,ichi:0.20,bunji:0.11,sosuke:0.07});
@@ -3890,41 +3890,47 @@ async function processDelayedDmState(){
 function enqueueDelayedDmResult(conversation,userMessage,result){
   const timing=result?.replyTiming;
   const hasReaction=Boolean(normalizeReactionEmoji(result?.reaction?.emoji));
-  if(!timing?.readAt||!timing?.replyAt||(!String(result?.reply||"").trim()&&!hasReaction))return false;
+  const sequence=(Array.isArray(result?.replySequence)?result.replySequence:[]).map(v=>String(v||"").trim()).filter(Boolean).slice(0,3);
+  if(!sequence.length&&String(result?.reply||"").trim()&&result?.reactionOnly!==true)sequence.push(String(result.reply).trim());
+  if(!timing?.readAt||!timing?.replyAt||(!sequence.length&&!hasReaction))return false;
 
   const state=loadDelayedDmState();
-  const token=`${conversation.id}-${userMessage.id}`;
+  const tokenBase=`${conversation.id}-${userMessage.id}`;
+  state.reads=state.reads.filter(item=>item?.token!==tokenBase);
+  state.reads.push({token:tokenBase,conversationId:conversation.id,throughCreatedAt:userMessage.createdAt,readAt:timing.readAt});
+  state.replies=state.replies.filter(item=>!String(item?.token||"").startsWith(`${tokenBase}-reply-`)&&item?.token!==tokenBase);
 
-  state.reads=state.reads.filter(item=>item?.token!==token);
-  state.reads.push({
-    token,
-    conversationId:conversation.id,
-    throughCreatedAt:userMessage.createdAt,
-    readAt:timing.readAt
-  });
-
-  const eventId=result?.scheduledReply?.eventId||null;
-  const dmReplyText=String(result.reply||"").trim();
-  const dmTypingDurationMs=result?.reactionOnly===true?0:replyTypingDurationMs(dmReplyText);
-  state.replies=state.replies.filter(item=>item?.token!==token);
-  state.replies.push({
-    token,
-    conversationId:conversation.id,
-    characterId:conversation.characterId,
-    reply:dmReplyText,
-    typingDurationMs:dmTypingDurationMs,
-    typingStartAt:typingStartIso(timing.replyAt,dmTypingDurationMs,timing.readAt),
-    reaction:hasReaction?{emoji:normalizeReactionEmoji(result.reaction.emoji),targetMessageId:String(result.reaction.targetMessageId||userMessage.id)}:null,
-    reactionOnly:result?.reactionOnly===true,
-    replyTo:result?.replyTo||null,
-    replyAt:timing.replyAt,
-    eventId,
-    localMessageId:eventId?`push-${eventId}`:`delayed-${token}`
-  });
-
-  saveDelayedDmState(state);
-  processDelayedDmState();
-  return true;
+  const sequenceTimings=Array.isArray(result?.replySequenceTimings)?result.replySequenceTimings:[];
+  const scheduledSequence=Array.isArray(result?.scheduledReply?.sequence)?result.scheduledReply.sequence:[];
+  if(result?.reactionOnly===true){
+    const eventId=result?.scheduledReply?.eventId||null;
+    state.replies.push({
+      token:tokenBase,conversationId:conversation.id,characterId:conversation.characterId,reply:"",typingDurationMs:0,typingStartAt:"",
+      reaction:hasReaction?{emoji:normalizeReactionEmoji(result.reaction.emoji),targetMessageId:String(result.reaction.targetMessageId||userMessage.id)}:null,
+      reactionOnly:true,replyTo:null,readAt:timing.readAt,replyAt:timing.replyAt,eventId,localMessageId:eventId?`push-${eventId}`:`delayed-${tokenBase}`
+    });
+  }else{
+    for(let index=0;index<sequence.length;index+=1){
+      const part=sequence[index];
+      const seqTiming=sequenceTimings[index]||{};
+      const scheduled=scheduledSequence[index]||{};
+      const replyAt=seqTiming.replyAt||scheduled.replyAt||timing.replyAt;
+      const sequenceGapMs=Number(seqTiming.gapMs||scheduled.gapMs||0);
+      const typingDurationMs=index===0?replyTypingDurationMs(part):(sequenceGapMs>=1000?Math.max(0,Math.min(replyTypingDurationMs(part),sequenceGapMs-180)):0);
+      const typingStartAt=index===0
+        ? String(seqTiming.typingStartAt||scheduled.typingStartAt||typingStartIso(replyAt,typingDurationMs,timing.readAt))
+        : (sequenceGapMs>=1000?String(seqTiming.typingStartAt||scheduled.typingStartAt||typingStartIso(replyAt,typingDurationMs,timing.readAt)):"");
+      const eventId=scheduled.eventId||(index===0?result?.scheduledReply?.eventId:null)||null;
+      state.replies.push({
+        token:`${tokenBase}-reply-${index}`,conversationId:conversation.id,characterId:conversation.characterId,reply:part,
+        typingDurationMs,typingStartAt,
+        reaction:index===0&&hasReaction?{emoji:normalizeReactionEmoji(result.reaction.emoji),targetMessageId:String(result.reaction.targetMessageId||userMessage.id)}:null,
+        reactionOnly:false,replyTo:index===0?(result?.replyTo||null):null,readAt:timing.readAt,replyAt,eventId,
+        localMessageId:eventId?`push-${eventId}`:`delayed-${tokenBase}-${index}`
+      });
+    }
+  }
+  saveDelayedDmState(state);processDelayedDmState();return true;
 }
 
 function removeDelayedDmForConversation(conversationId){
@@ -4166,7 +4172,10 @@ function enqueueDelayedGroupResult(conversation,userMessage,result){
     const eventId=reply?.scheduledReply?.eventId||null;
     const token=`${tokenBase}-reply-${index}-${reply.speakerId}`;
     const groupReplyText=String(reply.message).trim();
-    const groupTypingDurationMs=replyTypingDurationMs(groupReplyText,{group:true});
+    const sequenceGapMs=Number(reply?.sequenceGapMs||0);
+    const groupTypingDurationMs=reply?.sequenceContinuation
+      ? (sequenceGapMs>=1000?Math.max(0,Math.min(replyTypingDurationMs(groupReplyText,{group:true}),sequenceGapMs-180)):0)
+      : replyTypingDurationMs(groupReplyText,{group:true});
 
     state.replies.push({
       token,
@@ -4175,7 +4184,7 @@ function enqueueDelayedGroupResult(conversation,userMessage,result){
       throughCreatedAt:userMessage.createdAt,
       reply:groupReplyText,
       typingDurationMs:groupTypingDurationMs,
-      typingStartAt:typingStartIso(timing.replyAt,groupTypingDurationMs,timing.readAt),
+      typingStartAt:reply?.sequenceContinuation&&sequenceGapMs<1000?"":String(timing.typingStartAt||typingStartIso(timing.replyAt,groupTypingDurationMs,timing.readAt)),
       reaction:normalizeReactionEmoji(reply?.reaction?.emoji)?{emoji:normalizeReactionEmoji(reply.reaction.emoji),targetMessageId:String(reply.reaction.targetMessageId||userMessage.id)}:null,
       replyTo:reply?.replyTo||null,
       readAt:timing.readAt||"",
@@ -4377,9 +4386,19 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
         await sleep(350);markOutgoingReadThrough(conversation.id,userMessage.createdAt);
         applyBackendReaction(conversation,result,userMessage.id);
         if(!result?.reactionOnly&&String(result?.reply||"").trim()){
-          const immediateReply=String(result.reply||"").trim();
-          setTyping(true);await sleep(replyTypingDurationMs(immediateReply));setTyping(false);
-          addMessage(conversation.id,conversation.characterId,immediateReply,{source:"ai",seenByUser:true,...replyQuoteOptions(conversation.id,result?.replyTo)});
+          const sequence=(Array.isArray(result?.replySequence)?result.replySequence:[]).map(v=>String(v||"").trim()).filter(Boolean).slice(0,3);
+          if(!sequence.length)sequence.push(String(result.reply||"").trim());
+          const timings=Array.isArray(result?.replySequenceTimings)?result.replySequenceTimings:[];
+          for(let index=0;index<sequence.length;index+=1){
+            const part=sequence[index];
+            if(index===0){setTyping(true);await sleep(replyTypingDurationMs(part));setTyping(false);}
+            else{
+              const gap=Math.max(700,Math.min(2500,Number(timings[index]?.gapMs||900)));
+              if(gap>=1000)setTyping(true);
+              await sleep(gap);setTyping(false);
+            }
+            addMessage(conversation.id,conversation.characterId,part,{source:"ai",seenByUser:true,...(index===0?replyQuoteOptions(conversation.id,result?.replyTo):{})});
+          }
         }
         scheduleDmProactive(conversation.characterId,"normal");
       }
@@ -4397,7 +4416,13 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
         for(const reply of replies){
           if(!characterById(reply?.speakerId)||!String(reply?.message||"").trim())continue;
           if(normalizeReactionEmoji(reply?.reaction?.emoji)){addReactionToMessage(conversation.id,String(reply.reaction.targetMessageId||userMessage.id),reply.speakerId,reply.reaction.emoji);}
-          setTyping(true,reply.speakerId);await sleep(replyTypingDurationMs(reply.message,{group:true}));setTyping(false);
+          if(reply?.sequenceContinuation){
+            const gap=Math.max(700,Math.min(2500,Number(reply?.sequenceGapMs||900)));
+            if(gap>=1000)setTyping(true,reply.speakerId);
+            await sleep(gap);setTyping(false);
+          }else{
+            setTyping(true,reply.speakerId);await sleep(replyTypingDurationMs(reply.message,{group:true}));setTyping(false);
+          }
           addMessage(conversation.id,reply.speakerId,String(reply.message).trim(),{source:"group-ai-fallback",seenByUser:true,...replyQuoteOptions(conversation.id,reply?.replyTo)});
         }
       }
