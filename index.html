@@ -471,6 +471,112 @@ button { -webkit-tap-highlight-color: transparent; }
   line-height: 1;
 }
 .message-reaction-count { color: #6f747a; font-size: 9px; }
+.message-reaction-chip.mine {
+  border-color: rgba(57,112,73,.36);
+  background: rgba(240,249,242,.97);
+}
+.message-row.incoming .bubble,
+.message-row.incoming .media-message,
+.message-row.incoming .sticker-message,
+.message-row.incoming .sticker-message-mini {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Phase 3.2.17: ましろ側リアクション・引用返信 */
+.reply-composer-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 7px 4px;
+  padding: 7px 8px 7px 10px;
+  max-width: min(420px, calc(100vw - 28px));
+  border-left: 3px solid rgba(67,126,84,.62);
+  border-radius: 10px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 1px 4px rgba(0,0,0,.07);
+}
+.reply-composer-preview[hidden] { display: none; }
+.reply-composer-copy { flex: 1; min-width: 0; }
+.reply-composer-sender { color: #397049; font-size: 11px; font-weight: 800; }
+.reply-composer-text {
+  margin-top: 2px;
+  color: #666b72;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reply-composer-remove {
+  width: 27px;
+  height: 27px;
+  border: 0;
+  border-radius: 50%;
+  background: #eef0f2;
+  color: #555b62;
+  font-size: 16px;
+}
+.message-action-dialog {
+  border: 0;
+  padding: 0;
+  width: min(92vw, 390px);
+  margin: auto auto max(16px, env(safe-area-inset-bottom));
+  background: transparent;
+}
+.message-action-dialog::backdrop {
+  background: rgba(0,0,0,.28);
+  backdrop-filter: blur(1px);
+}
+.message-action-card {
+  overflow: hidden;
+  border-radius: 20px;
+  background: rgba(250,250,252,.98);
+  box-shadow: 0 12px 34px rgba(0,0,0,.18);
+}
+.message-action-context {
+  padding: 12px 14px 9px;
+  border-bottom: 1px solid rgba(60,60,67,.10);
+}
+.message-action-sender { color: #397049; font-size: 11px; font-weight: 800; }
+.message-action-text {
+  margin-top: 3px;
+  color: #555b62;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.message-reaction-choices {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 5px;
+  padding: 11px 10px 9px;
+}
+.message-reaction-choice {
+  height: 42px;
+  border: 1px solid rgba(60,60,67,.10);
+  border-radius: 14px;
+  background: white;
+  font-size: 22px;
+}
+.message-reaction-choice.selected {
+  border-color: rgba(57,112,73,.55);
+  background: rgba(77,143,91,.12);
+  box-shadow: inset 0 0 0 1px rgba(57,112,73,.14);
+}
+.message-action-button {
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-top: 1px solid rgba(60,60,67,.10);
+  background: white;
+  color: #292b2f;
+  font-size: 14px;
+  font-weight: 700;
+}
+.message-action-button.cancel { color: #71767d; font-weight: 600; }
 
 .typing-row {
   min-height: 46px;
@@ -1440,6 +1546,13 @@ button { -webkit-tap-highlight-color: transparent; }
     </div>
 
     <form id="composer" class="composer">
+      <div id="replyComposerPreview" class="reply-composer-preview" hidden>
+        <div class="reply-composer-copy">
+          <div id="replyComposerSender" class="reply-composer-sender"></div>
+          <div id="replyComposerText" class="reply-composer-text"></div>
+        </div>
+        <button id="replyComposerRemove" class="reply-composer-remove" type="button" aria-label="引用返信を取り消す">×</button>
+      </div>
       <div id="attachmentPreview" class="attachment-preview" hidden>
         <img id="attachmentPreviewImage" alt="送信する写真のプレビュー" />
         <div class="attachment-preview-copy">
@@ -1505,6 +1618,25 @@ button { -webkit-tap-highlight-color: transparent; }
 
 <div id="toast" class="toast"></div>
 
+<dialog id="messageActionDialog" class="message-action-dialog">
+  <div class="message-action-card">
+    <div class="message-action-context">
+      <div id="messageActionSender" class="message-action-sender"></div>
+      <div id="messageActionText" class="message-action-text"></div>
+    </div>
+    <div id="messageReactionChoices" class="message-reaction-choices">
+      <button class="message-reaction-choice" type="button" data-reaction="👍" aria-label="いいね">👍</button>
+      <button class="message-reaction-choice" type="button" data-reaction="😂" aria-label="笑った">😂</button>
+      <button class="message-reaction-choice" type="button" data-reaction="😊" aria-label="うれしい">😊</button>
+      <button class="message-reaction-choice" type="button" data-reaction="😮" aria-label="びっくり">😮</button>
+      <button class="message-reaction-choice" type="button" data-reaction="🙏" aria-label="ありがとう・お願い">🙏</button>
+      <button class="message-reaction-choice" type="button" data-reaction="👏" aria-label="拍手">👏</button>
+    </div>
+    <button id="messageReplyAction" class="message-action-button" type="button">↩ 返信</button>
+    <button id="messageActionCancel" class="message-action-button cancel" type="button">キャンセル</button>
+  </div>
+</dialog>
+
 <dialog id="accessDialog" class="dialog">
   <form id="accessForm" class="dialog-card">
     <h3>AI接続コード</h3>
@@ -1553,7 +1685,7 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
-const PUSH_VERSION = "phase3.2.16-generated-proactive-images-v1";
+const PUSH_VERSION = "phase3.2.17-user-reaction-quote-reply-v1";
 const PROACTIVE_CONTINUITY_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
 const PROACTIVE_CONTINUITY_MAX_STAGES = 3;
 const PROACTIVE_CONTINUITY_START_CHANCE = Object.freeze({natsuki:0.20,shiki:0.16,ichi:0.20,bunji:0.11,sosuke:0.07});
@@ -1669,6 +1801,9 @@ const appState = {
   groupAutonomousTestBusy: false,
   pendingImage: null,
   pendingImagePreviewUrl: "",
+  pendingReply: null,
+  messageActionTarget: null,
+  messageLongPressTimer: null,
   stickerPanelOpen: false,
   messageScrollUserGeneration: 0,
   messageScrollRestoreToken: 0,
@@ -1730,6 +1865,16 @@ const chatImageInput = document.getElementById("chatImageInput");
 const attachmentPreview = document.getElementById("attachmentPreview");
 const attachmentPreviewImage = document.getElementById("attachmentPreviewImage");
 const attachmentRemoveButton = document.getElementById("attachmentRemoveButton");
+const replyComposerPreview = document.getElementById("replyComposerPreview");
+const replyComposerSender = document.getElementById("replyComposerSender");
+const replyComposerText = document.getElementById("replyComposerText");
+const replyComposerRemove = document.getElementById("replyComposerRemove");
+const messageActionDialog = document.getElementById("messageActionDialog");
+const messageActionSender = document.getElementById("messageActionSender");
+const messageActionText = document.getElementById("messageActionText");
+const messageReactionChoices = document.getElementById("messageReactionChoices");
+const messageReplyAction = document.getElementById("messageReplyAction");
+const messageActionCancel = document.getElementById("messageActionCancel");
 const toast = document.getElementById("toast");
 
 const settingsBackButton = document.getElementById("settingsBackButton");
@@ -1799,6 +1944,96 @@ function addReactionToMessage(conversationId,targetMessageId,reactorId,emoji,cre
   renderTalkList();
   return true;
 }
+function removeReactionFromMessage(conversationId,targetMessageId,reactorId){
+  if(!conversationId||!targetMessageId||!reactorId)return false;
+  const messages=loadConversationMessages(conversationId);
+  const target=messages.find(message=>String(message?.id||"")===String(targetMessageId));
+  if(!target)return false;
+  const reactions=normalizeMessageReactions(target.reactions);
+  const next=reactions.filter(item=>item.reactorId!==reactorId);
+  if(next.length===reactions.length)return false;
+  target.reactions=next;
+  saveConversationMessages(conversationId,messages);
+  if(isConversationActuallyVisible(conversationId))renderMessages({scrollMode:messageListNearBottom()?"bottom":"preserve"});
+  renderTalkList();
+  return true;
+}
+function toggleMashiroReaction(conversationId,targetMessageId,emoji){
+  const normalizedEmoji=normalizeReactionEmoji(emoji);
+  if(!normalizedEmoji)return false;
+  const target=loadConversationMessages(conversationId).find(message=>String(message?.id||"")===String(targetMessageId));
+  if(!target||target.senderId==="mashiro")return false;
+  const existing=normalizeMessageReactions(target.reactions).find(item=>item.reactorId==="mashiro");
+  if(existing?.emoji===normalizedEmoji)return removeReactionFromMessage(conversationId,targetMessageId,"mashiro");
+  return addReactionToMessage(conversationId,targetMessageId,"mashiro",normalizedEmoji);
+}
+function renderReplyComposerPreview(){
+  const reply=appState.pendingReply;
+  const activeId=appState.activeConversationId;
+  if(!reply||reply.conversationId!==activeId){
+    replyComposerPreview.hidden=true;
+    replyComposerSender.textContent="";
+    replyComposerText.textContent="";
+    return;
+  }
+  replyComposerSender.textContent=`${senderDisplayName(reply.senderId)}への返信`;
+  replyComposerText.textContent=reply.excerpt||"メッセージ";
+  replyComposerPreview.hidden=false;
+}
+function clearPendingReply(){
+  appState.pendingReply=null;
+  renderReplyComposerPreview();
+}
+function setPendingReplyFromMessage(conversationId,message){
+  if(!conversationId||!message||message.senderId==="mashiro")return false;
+  appState.pendingReply={
+    conversationId,
+    messageId:String(message.id||""),
+    senderId:String(message.senderId||""),
+    excerpt:String(messagePreviewText(message)||"メッセージ").replace(/\s+/g," ").trim().slice(0,120)
+  };
+  renderReplyComposerPreview();
+  closeStickerPanel();
+  setTimeout(()=>messageInput.focus(),40);
+  return true;
+}
+function pendingReplyOptions(conversationId){
+  const reply=appState.pendingReply;
+  if(!reply||reply.conversationId!==conversationId||!reply.messageId)return{};
+  return {
+    replyToId:reply.messageId,
+    replyToSenderId:reply.senderId,
+    replyToText:reply.excerpt
+  };
+}
+function messageActionTargetMessage(){
+  const target=appState.messageActionTarget;
+  if(!target||target.conversationId!==appState.activeConversationId)return null;
+  return loadConversationMessages(target.conversationId).find(message=>String(message?.id||"")===String(target.messageId||""))||null;
+}
+function refreshMessageActionSelection(){
+  const target=messageActionTargetMessage();
+  const current=target?normalizeMessageReactions(target.reactions).find(item=>item.reactorId==="mashiro")?.emoji||"":"";
+  for(const button of messageReactionChoices.querySelectorAll("[data-reaction]")){
+    button.classList.toggle("selected",button.dataset.reaction===current);
+  }
+}
+function openMessageActionMenu(messageId){
+  const conversation=activeConversation();
+  if(!conversation)return;
+  const message=loadConversationMessages(conversation.id).find(item=>String(item?.id||"")===String(messageId||""));
+  if(!message||message.senderId==="mashiro")return;
+  appState.messageActionTarget={conversationId:conversation.id,messageId:String(message.id||"")};
+  messageActionSender.textContent=senderDisplayName(message.senderId);
+  messageActionText.textContent=String(messagePreviewText(message)||"メッセージ").replace(/\s+/g," ").trim().slice(0,120);
+  refreshMessageActionSelection();
+  if(!messageActionDialog.open)messageActionDialog.showModal();
+}
+function closeMessageActionMenu(){
+  appState.messageActionTarget=null;
+  if(messageActionDialog.open)messageActionDialog.close();
+}
+
 function replyQuoteOptions(conversationId,replyTo){
   const id=String(replyTo?.messageId||replyTo?.id||"").trim();
   if(!id)return{};
@@ -2682,6 +2917,7 @@ function openConversation(conversationId,pushHistory=true){
   appState.messageScrollRestoreToken+=1;
   chatScreen.classList.add("initializing");
   appState.activeConversationId=conversationId;
+  clearPendingReply();
   if(conversation.type==="dm"){
     const c=characterById(conversation.characterId);chatTitle.textContent=getCharacterDisplayName(c.id);setPresenceStatusText(presenceSupportedConversation(conversation)?"":"オンライン");typingLabel.textContent=`${getCharacterDisplayName(c.id)}が入力中…`;applyCharacterAvatar(headerAvatar,c.id);applyCharacterAvatar(typingAvatar,c.id);
   }else{
@@ -2696,7 +2932,7 @@ function openConversation(conversationId,pushHistory=true){
   setTimeout(refreshScheduledTypingForActiveConversation,80);
   if(pushHistory)history.pushState({conversationId},"",`#chat=${conversationId}`);
 }
-function showTalkList(pushHistory=true){appState.chatOpenRenderToken+=1;chatScreen.classList.remove("initializing");appState.delayedTypingToken=null;appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";clearPendingImage();closeStickerPanel();autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
+function showTalkList(pushHistory=true){appState.chatOpenRenderToken+=1;chatScreen.classList.remove("initializing");appState.delayedTypingToken=null;appState.activeConversationId=null;appState.isReplying=false;setTyping(false);messageInput.value="";clearPendingImage();clearPendingReply();closeStickerPanel();autosizeInput();chatScreen.hidden=true;settingsScreen.hidden=true;profileScreen.hidden=true;listScreen.hidden=false;renderTalkList();if(pushHistory)history.pushState({list:true},"",location.pathname+location.search);}
 
 
 function revealOpenedConversationAtBottom(conversationId,openToken){
@@ -3025,7 +3261,7 @@ function renderMessages(options={}){
         const item=grouped.get(reaction.emoji)||{emoji:reaction.emoji,reactors:[]};item.reactors.push(reaction.reactorId);grouped.set(reaction.emoji,item);
       }
       for(const item of grouped.values()){
-        const chip=document.createElement("span");chip.className="message-reaction-chip";chip.textContent=item.emoji;chip.title=item.reactors.map(senderDisplayName).join("、");
+        const chip=document.createElement("span");chip.className="message-reaction-chip";if(item.reactors.includes("mashiro"))chip.classList.add("mine");chip.textContent=item.emoji;chip.title=item.reactors.map(senderDisplayName).join("、");
         if(item.reactors.length>1){const count=document.createElement("span");count.className="message-reaction-count";count.textContent=String(item.reactors.length);chip.appendChild(count);}
         reactionsNode.appendChild(chip);
       }
@@ -4024,6 +4260,8 @@ function recentHistoryForAPI(conversationId){return loadConversationMessages(con
   generatedImageId:String(m.generatedImageId||"").slice(0,120),
   mediaSummary:String(m.mediaSummary||"").slice(0,300),
   replyToId:String(m.replyToId||""),
+  replyToSenderId:String(m.replyToSenderId||""),
+  replyToText:String(m.replyToText||"").slice(0,120),
   reactions:normalizeMessageReactions(m.reactions)
 }));}
 
@@ -4100,6 +4338,7 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
   }
 
   const storedText=messageType==="sticker"?stickerToken(stickerId):cleanText;
+  const replyOptions=pendingReplyOptions(conversation.id);
   const userMessage=addMessage(conversation.id,"mashiro",storedText,{
     readByCharacter:false,
     source:"user",
@@ -4108,10 +4347,11 @@ async function sendUserPayload({text="",messageType="text",stickerId="",image=nu
     mediaId,
     mediaMime:image?.mime||"",
     mediaWidth:image?.width||0,
-    mediaHeight:image?.height||0
+    mediaHeight:image?.height||0,
+    ...replyOptions
   });
 
-  messageInput.value="";clearPendingImage();closeStickerPanel();autosizeInput();appState.isReplying=true;sendButton.disabled=true;
+  messageInput.value="";clearPendingImage();clearPendingReply();closeStickerPanel();autosizeInput();appState.isReplying=true;sendButton.disabled=true;
 
   // Phase 3.2.4: オンライン中の会話ラリーでは、
   // AI生成完了を待たずPWA側で数秒後に既読を付ける。
@@ -5789,7 +6029,55 @@ async function maybeSendGroupProactive(groupId){
 async function proactiveTick(){if(pushNotificationsEnabled())return;if(appState.proactiveBusy||document.visibilityState!=="visible")return;appState.proactiveBusy=true;try{const due=[];for(const id of Object.keys(CHARACTERS)){const s=loadDmProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"dm",id,due:s.nextDueAt});}for(const id of Object.keys(GROUPS)){const s=loadGroupProactiveState(id);if(Date.now()>=s.nextDueAt)due.push({type:"group",id,due:s.nextDueAt});}due.sort((a,b)=>a.due-b.due);const next=due[0];if(next){if(next.type==="dm")await maybeSendDmProactive(next.id);else await maybeSendGroupProactive(next.id);}}finally{appState.proactiveBusy=false;}}
 function startProactiveScheduler(){clearInterval(appState.proactiveTimer);setTimeout(proactiveTick,1500);appState.proactiveTimer=setInterval(proactiveTick,60*1000);document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")setTimeout(proactiveTick,700);});window.addEventListener("focus",()=>setTimeout(proactiveTick,700));}
 
-async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);removeDelayedDmForConversation(conversation.id);removeDelayedGroupForConversation(conversation.id);await deleteMediaForConversation(conversation.id);clearPendingImage();closeStickerPanel();saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
+async function resetActiveConversation(clearMemory){const conversation=activeConversation();if(!conversation)return;appState.currentRequestController?.abort();appState.isReplying=false;setTyping(false);removeDelayedDmForConversation(conversation.id);removeDelayedGroupForConversation(conversation.id);await deleteMediaForConversation(conversation.id);clearPendingImage();clearPendingReply();closeStickerPanel();saveConversationMessages(conversation.id,conversationSeed(conversation));if(conversation.type==="dm"){if(clearMemory)localStorage.removeItem(memoryKey(conversation.characterId));localStorage.removeItem(proactiveKey(conversation.characterId));}else{if(clearMemory)localStorage.removeItem(groupMemoryKey(conversation.groupId));localStorage.removeItem(groupProactiveKey(conversation.groupId));}resetMemoryCheckbox.checked=false;renderMessages();renderTalkList();autosizeInput();setTimeout(()=>scrollToBottom("auto"),0);}
+
+// Phase 3.2.17: incoming message long-press actions.
+let messageLongPressState=null;
+function cancelMessageLongPress(){
+  if(appState.messageLongPressTimer){clearTimeout(appState.messageLongPressTimer);appState.messageLongPressTimer=null;}
+  messageLongPressState=null;
+}
+messageList.addEventListener("pointerdown",event=>{
+  if(event.button!==undefined&&event.button!==0)return;
+  const row=event.target.closest?.(".message-row.incoming[data-message-id]");
+  if(!row)return;
+  cancelMessageLongPress();
+  messageLongPressState={pointerId:event.pointerId,x:event.clientX,y:event.clientY,messageId:row.dataset.messageId};
+  appState.messageLongPressTimer=setTimeout(()=>{
+    const state=messageLongPressState;
+    appState.messageLongPressTimer=null;
+    if(!state)return;
+    openMessageActionMenu(state.messageId);
+    messageLongPressState=null;
+  },480);
+},{passive:true});
+messageList.addEventListener("pointermove",event=>{
+  const state=messageLongPressState;if(!state||state.pointerId!==event.pointerId)return;
+  if(Math.hypot(event.clientX-state.x,event.clientY-state.y)>12)cancelMessageLongPress();
+},{passive:true});
+messageList.addEventListener("pointerup",cancelMessageLongPress,{passive:true});
+messageList.addEventListener("pointercancel",cancelMessageLongPress,{passive:true});
+messageList.addEventListener("contextmenu",event=>{
+  const row=event.target.closest?.(".message-row.incoming[data-message-id]");
+  if(row)event.preventDefault();
+});
+messageReactionChoices.addEventListener("click",event=>{
+  const button=event.target.closest?.("[data-reaction]");
+  const target=messageActionTargetMessage();
+  if(!button||!target)return;
+  toggleMashiroReaction(appState.activeConversationId,target.id,button.dataset.reaction);
+  closeMessageActionMenu();
+});
+messageReplyAction.addEventListener("click",()=>{
+  const target=messageActionTargetMessage();
+  const conversationId=appState.activeConversationId;
+  if(target&&conversationId)setPendingReplyFromMessage(conversationId,target);
+  closeMessageActionMenu();
+});
+messageActionCancel.addEventListener("click",closeMessageActionMenu);
+messageActionDialog.addEventListener("cancel",event=>{event.preventDefault();closeMessageActionMenu();});
+messageActionDialog.addEventListener("click",event=>{if(event.target===messageActionDialog)closeMessageActionMenu();});
+replyComposerRemove.addEventListener("click",clearPendingReply);
 
 composer.addEventListener("submit",e=>{e.preventDefault();sendUserMessage();});
 photoButton.addEventListener("click",()=>{closeStickerPanel();chatImageInput.click();});
