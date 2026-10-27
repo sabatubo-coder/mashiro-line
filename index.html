@@ -1685,9 +1685,10 @@ const PUSH_SETTINGS_KEY = "mashiroLine.phase2_4.push.settings.v1";
 const DELAYED_DM_STATE_KEY = "mashiroLine.phase2_8.delayedDm.v1";
 const DELAYED_GROUP_STATE_KEY = "mashiroLine.phase3_1_1.delayedGroup.v1";
 const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
+const PUSH_SEEN_CONVERSATION_QUEUE_KEY = "mashiroLine.phase3_2_22a.pushSeenConversationQueue.v1";
 const AWAY_STATE_KEY = "mashiroLine.phase3_2_20.characterAway.v1";
 const CONVERSATION_REST_KEY = "mashiroLine.phase3_2_21.conversationRest.v1";
-const PUSH_VERSION = "phase3.2.22-school-timetable-breaks-v1";
+const PUSH_VERSION = "phase3.2.22a-reaction-badge-seen-sync-v1";
 const PROACTIVE_CONTINUITY_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
 const PROACTIVE_CONTINUITY_MAX_STAGES = 3;
 const PROACTIVE_CONTINUITY_START_CHANCE = Object.freeze({natsuki:0.20,shiki:0.16,ichi:0.20,bunji:0.11,sosuke:0.07});
@@ -2700,6 +2701,10 @@ function markIncomingSeen(conversationId,{force=false}={}){
     .filter(m=>m.senderId!=="mashiro"&&m.seenByUser&&m.pushEventId)
     .map(m=>String(m.pushEventId));
   if(seenPushEventIds.length)queueSeenPushEvents(seenPushEventIds);
+  // Phase 3.2.22a: リアクション単体Pushは新しい吹き出しを作らないため、
+  // eventIdがメッセージ側に残らない。該当トークを実際に開いた時点で、
+  // そのトークに配信済みの未確認Push（リアクションを含む）もまとめて既読同期する。
+  queueSeenPushConversations([conversationId]);
   updateAppBadgeFromLocal();
   return changed;
 }
@@ -3941,6 +3946,7 @@ async function processDelayedDmState(){
 
     if(item.reaction?.emoji){
       addReactionToMessage(item.conversationId,item.reaction.targetMessageId,item.characterId,item.reaction.emoji,item.replyAt);
+      if(item.eventId&&isConversationActuallyVisible(item.conversationId))queueSeenPushEvents([item.eventId]);
     }
     if(!existing&&!item.reactionOnly&&String(item.reply||"").trim()){
       addMessage(
@@ -4178,6 +4184,7 @@ async function processDelayedGroupState(){
 
     if(item.reaction?.emoji){
       addReactionToMessage(item.conversationId,item.reaction.targetMessageId,item.characterId,item.reaction.emoji,item.replyAt);
+      if(item.eventId&&isConversationActuallyVisible(item.conversationId))queueSeenPushEvents([item.eventId]);
     }
     if(!existing&&String(item.reply||"").trim()){
       const visible=
@@ -5419,6 +5426,7 @@ async function pullPendingPushMessages(){
       const existing=loadConversationMessages(conversation.id).some(m=>m.id===messageId||m.pushEventId===event.eventId);
       if(isReaction&&reactionEmoji){
         addReactionToMessage(conversation.id,String(event?.meta?.reactionTargetMessageId||""),event.speakerId,reactionEmoji,event.createdAt||"");
+        if(isConversationActuallyVisible(conversation.id))queueSeenPushEvents([event.eventId]);
       }
       if(!existing&&event?.meta?.messageType!=="reaction"&&(messageText||isImage||isSticker)){
         addMessage(conversation.id,event.speakerId,messageText,{
@@ -5481,9 +5489,29 @@ function queueSeenPushEvents(eventIds){
   clearTimeout(appState.pushSeenSyncTimer);
   appState.pushSeenSyncTimer=setTimeout(flushSeenPushEvents,180);
 }
+function loadPushSeenConversationQueue(){
+  try{
+    const parsed=JSON.parse(localStorage.getItem(PUSH_SEEN_CONVERSATION_QUEUE_KEY)||"[]");
+    return Array.isArray(parsed)?[...new Set(parsed.map(String).filter(Boolean))].slice(-100):[];
+  }catch{return [];}
+}
+function savePushSeenConversationQueue(ids){
+  const unique=[...new Set((Array.isArray(ids)?ids:[]).map(String).filter(Boolean))].slice(-100);
+  if(unique.length)localStorage.setItem(PUSH_SEEN_CONVERSATION_QUEUE_KEY,JSON.stringify(unique));
+  else localStorage.removeItem(PUSH_SEEN_CONVERSATION_QUEUE_KEY);
+}
+function queueSeenPushConversations(conversationIds){
+  const incoming=(Array.isArray(conversationIds)?conversationIds:[]).map(String).filter(Boolean);
+  if(!incoming.length)return;
+  savePushSeenConversationQueue([...loadPushSeenConversationQueue(),...incoming]);
+  clearTimeout(appState.pushSeenSyncTimer);
+  appState.pushSeenSyncTimer=setTimeout(flushSeenPushEvents,180);
+}
 async function flushSeenPushEvents(){
   if(appState.pushSeenSyncBusy||!pushNotificationsEnabled())return;
-  const ids=loadPushSeenQueue();if(!ids.length)return;
+  const ids=loadPushSeenQueue();
+  const conversationIds=loadPushSeenConversationQueue();
+  if(!ids.length&&!conversationIds.length)return;
   const apiEndpoint=getApiEndpoint(),accessCode=getAccessCode();
   if(!apiEndpoint||!accessCode)return;
   appState.pushSeenSyncBusy=true;
@@ -5491,11 +5519,14 @@ async function flushSeenPushEvents(){
     const result=await fetchJsonWithRetry(endpointFor(apiEndpoint,"pushSeen"),{
       method:"POST",
       headers:pushAuthHeaders(accessCode),
-      body:JSON.stringify({deviceId:getPushDeviceId(),eventIds:ids})
+      body:JSON.stringify({deviceId:getPushDeviceId(),eventIds:ids,conversationIds})
     },0);
     const seenIds=Array.isArray(result?.eventIds)?result.eventIds:ids;
     const seenSet=new Set(seenIds.map(String));
     savePushSeenQueue(loadPushSeenQueue().filter(id=>!seenSet.has(id)));
+    const seenConversationIds=Array.isArray(result?.conversationIds)?result.conversationIds:[];
+    const seenConversationSet=new Set(seenConversationIds.map(String));
+    savePushSeenConversationQueue(loadPushSeenConversationQueue().filter(id=>!seenConversationSet.has(id)));
     if(Number.isFinite(Number(result?.badgeCount))){
       applyServerBadgeState(
         result.badgeCount,
