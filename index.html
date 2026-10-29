@@ -1688,7 +1688,7 @@ const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
 const PUSH_SEEN_CONVERSATION_QUEUE_KEY = "mashiroLine.phase3_2_22a.pushSeenConversationQueue.v1";
 const AWAY_STATE_KEY = "mashiroLine.phase3_2_20.characterAway.v1";
 const CONVERSATION_REST_KEY = "mashiroLine.phase3_2_21.conversationRest.v1";
-const PUSH_VERSION = "phase3.2.22a-reaction-badge-seen-sync-v1";
+const PUSH_VERSION = "phase3.2.22b-cross-character-topic-diversity-v1";
 const PROACTIVE_CONTINUITY_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
 const PROACTIVE_CONTINUITY_MAX_STAGES = 3;
 const PROACTIVE_CONTINUITY_START_CHANCE = Object.freeze({natsuki:0.20,shiki:0.16,ichi:0.20,bunji:0.11,sosuke:0.07});
@@ -5803,6 +5803,24 @@ function saveDmProactiveState(id,state){localStorage.setItem(proactiveKey(id),JS
 function scheduleDmProactive(id,mode="normal"){const c=characterById(id),s=loadDmProactiveState(id),now=Date.now();if(isQuietTime())s.nextDueAt=nextMorningTimestamp();else if(mode==="retry")s.nextDueAt=now+randomBetween(12*60*1000,25*60*1000);else s.nextDueAt=now+randomBetween(c.proactive.normalMinMs,c.proactive.normalMaxMs);saveDmProactiveState(id,s);}
 function latestMessage(conversationId,senderId=null){const messages=loadConversationMessages(conversationId);for(let i=messages.length-1;i>=0;i--){if(!senderId||messages[i].senderId===senderId)return messages[i];}return null;}
 
+// Phase 3.2.22b: Cross-chat deduplication input stays server-side; it is never shown to characters.
+function recentCrossCharacterTopicMessages(){
+  const now=Date.now(), after=now-30*24*60*60*1000;
+  const ids=["natsuki","shiki","ichi","bunji","sosuke"];
+  const items=[];
+  for(const id of ids){
+    const character=characterById(id);
+    if(!character?.conversationId)continue;
+    for(const message of (loadConversationMessages(character.conversationId)||[]).slice(-55)){
+      const at=Date.parse(String(message?.createdAt||""));
+      if(message?.senderId!==id||!Number.isFinite(at)||at<after||!String(message?.text||"").trim())continue;
+      if(String(message?.messageType||"")==="sticker")continue;
+      items.push({senderId:id,createdAt:new Date(at).toISOString(),text:String(message.text).slice(0,400)});
+    }
+  }
+  return items.sort((a,b)=>Date.parse(a.createdAt)-Date.parse(b.createdAt)).slice(-100);
+}
+
 async function callDmProactive(
   characterId,
   accessCode,
@@ -5848,6 +5866,7 @@ async function callDmProactive(
             )?.createdAt||null,
           recentProactiveHistory:
             state.recentProactiveHistory||[],
+          recentCharacterTopicMessages:recentCrossCharacterTopicMessages(),
           activeContinuityEvent:normalizeDmContinuityEvent(state.activeContinuityEvent),
           continuityEventDue:dmContinuityDue(state),
           continuityStartAllowed:dmContinuityStartAllowed(characterId,state),
