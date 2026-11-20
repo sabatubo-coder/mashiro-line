@@ -1,4 +1,4 @@
-const CACHE_NAME = "mashiro-line-phase3-2-23-natsuki-natural-banter-v1";
+const CACHE_NAME = "mashiro-line-phase3-2-23a-local-backup-restore-v1";
 const ASSETS = [
   "./",
   "./index.html",

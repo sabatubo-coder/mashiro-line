@@ -1230,6 +1230,20 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 
+
+/* Phase 3.2.23a: local data backup / restore */
+.backup-card { background: #fff; border-radius: 16px; overflow: hidden; padding: 15px; }
+.backup-description { color: #61666d; font-size: 12px; line-height: 1.7; margin: 0 0 12px; }
+.backup-buttons { display: grid; gap: 9px; }
+.backup-button { width: 100%; min-height: 45px; border: 0; border-radius: 12px; padding: 9px 12px; font-size: 14px; font-weight: 700; background: #f0f2f4; color: #34383d; cursor: pointer; }
+.backup-button.primary { background: var(--accent); color: white; }
+.backup-button:disabled { opacity: .5; cursor: default; }
+.backup-status { margin: 11px 0 0; padding: 10px 11px; border-radius: 10px; background: #f3f6f8; color: #515960; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.backup-warning { color: #86551e; background: #fff3df; border-radius: 9px; padding: 10px 11px; font-size: 11px; line-height: 1.6; margin: 10px 0 0; }
+.backup-dialog-summary { background: #f4f6f7; border-radius: 10px; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }
+.backup-confirm-row { display: flex; gap: 9px; align-items: flex-start; font-size: 12px; line-height: 1.6; padding: 11px 0 6px; }
+.backup-confirm-row input { margin-top: 3px; flex-shrink: 0; }
+
 .notification-card {
   border-radius: 16px;
   background: #fff;
@@ -1665,6 +1679,24 @@ button { -webkit-tap-highlight-color: transparent; }
 </dialog>
 
 
+<dialog id="backupRestoreDialog" class="dialog">
+  <div class="dialog-card">
+    <h3>バックアップから復元</h3>
+    <p id="backupRestoreSummary" class="backup-dialog-summary"></p>
+    <p class="backup-warning">現在のトーク・記憶・プロフィールと端末内の写真を、このファイルの内容で置き換えます。復元前に現在のデータも別途バックアップしてください。接続コード・Push通知の登録情報は置き換えません。</p>
+    <label class="backup-confirm-row">
+      <input id="backupRestoreConsent" type="checkbox" />
+      <span>現在のデータが上書きされることを理解し、復元前のバックアップを保存しました。</span>
+    </label>
+    <div class="dialog-actions">
+      <button id="backupRestoreCancel" class="dialog-button" type="button">キャンセル</button>
+      <button id="backupRestoreConfirm" class="dialog-button danger" type="button" disabled>復元する</button>
+    </div>
+  </div>
+</dialog>
+<input id="backupImportInput" type="file" accept=".json,application/json" hidden />
+
+
 <script src="config.js"></script>
 <script>
 const ACCESS_CODE_KEY = "mashiroLine.phase1_5.accessCode.v1";
@@ -1688,7 +1720,7 @@ const PUSH_SEEN_QUEUE_KEY = "mashiroLine.phase3_2_6.pushSeenQueue.v1";
 const PUSH_SEEN_CONVERSATION_QUEUE_KEY = "mashiroLine.phase3_2_22a.pushSeenConversationQueue.v1";
 const AWAY_STATE_KEY = "mashiroLine.phase3_2_20.characterAway.v1";
 const CONVERSATION_REST_KEY = "mashiroLine.phase3_2_21.conversationRest.v1";
-const PUSH_VERSION = "phase3.2.23-natsuki-natural-banter-v1";
+const PUSH_VERSION = "phase3.2.23a-local-data-backup-restore-v1";
 const PROACTIVE_CONTINUITY_CHARACTERS = new Set(["natsuki","shiki","ichi","bunji","sosuke"]);
 const PROACTIVE_CONTINUITY_MAX_STAGES = 3;
 const PROACTIVE_CONTINUITY_START_CHANCE = Object.freeze({natsuki:0.20,shiki:0.16,ichi:0.20,bunji:0.11,sosuke:0.07});
@@ -1907,6 +1939,13 @@ const resetTitle = document.getElementById("resetTitle");
 const resetMemoryCheckbox = document.getElementById("resetMemoryCheckbox");
 const resetMemoryLabel = document.getElementById("resetMemoryLabel");
 const confirmReset = document.getElementById("confirmReset");
+const backupRestoreDialog = document.getElementById("backupRestoreDialog");
+const backupRestoreSummary = document.getElementById("backupRestoreSummary");
+const backupRestoreConsent = document.getElementById("backupRestoreConsent");
+const backupRestoreCancel = document.getElementById("backupRestoreCancel");
+const backupRestoreConfirm = document.getElementById("backupRestoreConfirm");
+const backupImportInput = document.getElementById("backupImportInput");
+
 
 
 
@@ -3405,6 +3444,273 @@ function createSettingsRow({type,id,name,subtitle}){
   return row;
 }
 
+
+// Phase 3.2.23a: only the whitelisted on-device content is exported.
+// Never include the AI access code, Backend URL, Push device ID/subscription, queues or transient scheduler state.
+const LOCAL_BACKUP_FORMAT = "mashiro-line-local-data";
+const LOCAL_BACKUP_SCHEMA = 1;
+let preparedLocalBackup = null;
+let pendingLocalRestore = null;
+let localBackupBusy = false;
+let localBackupStatusText = "バックアップは、いつも利用しているホーム画面版のましろLINEから作成してください。";
+const LOCAL_BACKUP_MAX_FILE_BYTES = 220 * 1024 * 1024;
+const LOCAL_BACKUP_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
+function localBackupAllowedKeys(){
+  const keys = [];
+  for(const conversation of CONVERSATIONS)keys.push(messageKeyForConversation(conversation.id));
+  for(const character of Object.values(CHARACTERS))keys.push(memoryKey(character.id),avatarKey(character.id),characterDisplayNameKey(character.id));
+  for(const group of Object.values(GROUPS))keys.push(groupMemoryKey(group.id),groupAvatarKey(group.id),groupNameKey(group.id));
+  keys.push(selfDisplayNameKey(),selfAvatarKey());
+  return keys;
+}
+function localBackupStats(storage,media){
+  let messages=0,memories=0;
+  for(const conversation of CONVERSATIONS){
+    try{const list=JSON.parse(storage[messageKeyForConversation(conversation.id)]||"[]");if(Array.isArray(list))messages+=list.length;}catch{}
+  }
+  for(const character of Object.values(CHARACTERS)){
+    try{const list=JSON.parse(storage[memoryKey(character.id)]||"[]");if(Array.isArray(list))memories+=list.length;}catch{}
+  }
+  for(const group of Object.values(GROUPS)){
+    try{const list=JSON.parse(storage[groupMemoryKey(group.id)]||"[]");if(Array.isArray(list))memories+=list.length;}catch{}
+  }
+  return {conversations:CONVERSATIONS.length,messages,memories,images:media.length};
+}
+async function getAllLocalMediaRecords(){
+  const db=await openMediaDb();
+  try{
+    return await new Promise((resolve,reject)=>{
+      const tx=db.transaction(MEDIA_DB_STORE,"readonly");
+      const req=tx.objectStore(MEDIA_DB_STORE).getAll();
+      req.onsuccess=()=>resolve(Array.isArray(req.result)?req.result:[]);
+      req.onerror=()=>reject(req.error||new Error("media_read_failed"));
+      tx.onabort=()=>reject(tx.error||new Error("media_read_aborted"));
+    });
+  }finally{db.close();}
+}
+async function replaceAllLocalMediaRecords(records){
+  const db=await openMediaDb();
+  try{
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(MEDIA_DB_STORE,"readwrite");
+      const store=tx.objectStore(MEDIA_DB_STORE);
+      store.clear();
+      for(const record of records)store.put(record);
+      tx.oncomplete=()=>resolve();
+      tx.onerror=()=>reject(tx.error||new Error("media_replace_failed"));
+      tx.onabort=()=>reject(tx.error||new Error("media_replace_aborted"));
+    });
+  }finally{db.close();}
+}
+function localBackupFileName(){
+  const now=new Date();const num=n=>String(n).padStart(2,"0");
+  return `MashiroLine_Backup_${now.getFullYear()}${num(now.getMonth()+1)}${num(now.getDate())}_${num(now.getHours())}${num(now.getMinutes())}.json`;
+}
+async function buildLocalBackupFile(){
+  const storage=Object.create(null);
+  for(const key of localBackupAllowedKeys()){
+    const value=localStorage.getItem(key);
+    if(value!==null)storage[key]=value;
+  }
+  const rawMedia=await getAllLocalMediaRecords();
+  const media=[];
+  for(const record of rawMedia){
+    if(!(record?.blob instanceof Blob))throw new Error("media_blob_missing");
+    if(record.blob.size>LOCAL_BACKUP_MAX_IMAGE_BYTES)throw new Error("media_too_large");
+    media.push({
+      id:String(record.id||""),conversationId:String(record.conversationId||""),
+      mime:String(record.mime||record.blob.type||"image/jpeg"),
+      width:Number(record.width||0),height:Number(record.height||0),
+      createdAt:String(record.createdAt||""),source:String(record.source||""),
+      dataUrl:await blobToDataUrl(record.blob)
+    });
+  }
+  const result={format:LOCAL_BACKUP_FORMAT,schemaVersion:LOCAL_BACKUP_SCHEMA,
+    exportedAt:new Date().toISOString(),appVersion:PUSH_VERSION,
+    scope:"on-device-only",storage,media,counts:localBackupStats(storage,media)};
+  // Do not offer a file that this version of the app would refuse to restore.
+  validateLocalBackup(result);
+  const serialized=JSON.stringify(result);
+  const file=new File([serialized],localBackupFileName(),{type:"application/json"});
+  if(file.size>LOCAL_BACKUP_MAX_FILE_BYTES)throw new Error("backup_too_large");
+  return {file,counts:result.counts};
+}
+function restoreLocalBackupStatus(text){
+  localBackupStatusText=text;
+  const el=document.getElementById("localBackupStatus");if(el)el.textContent=text;
+}
+async function prepareLocalBackup(){
+  if(localBackupBusy)return;
+  localBackupBusy=true;preparedLocalBackup=null;
+  const btn=document.getElementById("prepareLocalBackupButton");
+  const save=document.getElementById("saveLocalBackupButton");
+  if(btn)btn.disabled=true;if(save)save.disabled=true;
+  restoreLocalBackupStatus("写真と会話データを確認し、バックアップファイルを作成しています…");
+  try{
+    const prepared=await buildLocalBackupFile();
+    preparedLocalBackup=prepared.file;
+    restoreLocalBackupStatus(`準備できました：${prepared.file.name}\nトーク ${prepared.counts.messages}件・記憶 ${prepared.counts.memories}件・画像 ${prepared.counts.images}件\n次に「保存・共有」を押し、iPhoneの「ファイルに保存」などで端末外にも保管してください。`);
+    if(save)save.disabled=false;
+  }catch(error){
+    console.error("local backup preparation failed",error);
+    restoreLocalBackupStatus("作成に失敗しました。写真を含む全データを保存できていないため、不完全なバックアップは出力しません。端末の空き容量を確認して再実行してください。");
+    showToast("バックアップを作成できませんでした",4500);
+  }finally{localBackupBusy=false;if(btn)btn.disabled=false;}
+}
+async function savePreparedLocalBackup(){
+  // Called directly from a tap; the file was already prepared to preserve iOS's user activation.
+  const file=preparedLocalBackup;
+  if(!file){showToast("先にバックアップを作成してください");return;}
+  if(navigator.share && navigator.canShare?.({files:[file]})){
+    try{
+      await navigator.share({files:[file],title:"ましろLINE バックアップ"});
+      restoreLocalBackupStatus(`共有画面を閉じました：${file.name}\n「ファイルに保存」などで実際に保存できたことを確認してください。共有だけではバックアップ完了とは限りません。`);
+      return;
+    }catch(error){
+      if(error?.name==="AbortError")return;
+      console.warn("backup share fallback",error);
+    }
+  }
+  const url=URL.createObjectURL(file);
+  const a=document.createElement("a");a.href=url;a.download=file.name;a.style.display="none";
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+  restoreLocalBackupStatus(`ダウンロードを開始しました：${file.name}\n「ファイル」アプリやダウンロード先に保存できたことを必ず確認してください。保存できない場合、ホーム画面版から再度「保存・共有」を試してください。`);
+}
+function localBackupSafeImageDataUrl(dataUrl){
+  return typeof dataUrl==="string" &&
+    /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(dataUrl) &&
+    dataUrl.length<LOCAL_BACKUP_MAX_IMAGE_BYTES*1.4;
+}
+function localBackupDataUrlBlob(dataUrl){
+  if(!localBackupSafeImageDataUrl(dataUrl))throw new Error("invalid_media_data");
+  const comma=dataUrl.indexOf(",");
+  const mime=dataUrl.slice(5,dataUrl.indexOf(";",5));
+  const bytes=atob(dataUrl.slice(comma+1));
+  if(bytes.length>LOCAL_BACKUP_MAX_IMAGE_BYTES)throw new Error("media_too_large");
+  const arr=new Uint8Array(bytes.length);
+  for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);
+  return new Blob([arr],{type:mime});
+}
+function validateLocalBackup(parsed){
+  if(!parsed || typeof parsed!=="object" || Array.isArray(parsed) ||
+     parsed.format!==LOCAL_BACKUP_FORMAT || parsed.schemaVersion!==LOCAL_BACKUP_SCHEMA ||
+     parsed.scope!=="on-device-only")throw new Error("backup_format_invalid");
+  if(!Number.isFinite(Date.parse(parsed.exportedAt)))throw new Error("backup_date_invalid");
+  if(!parsed.storage || typeof parsed.storage!=="object" || Array.isArray(parsed.storage))throw new Error("storage_invalid");
+  const allowed=new Set(localBackupAllowedKeys());
+  const keys=Object.keys(parsed.storage);
+  if(!keys.length || keys.some(key=>!allowed.has(key)))throw new Error("storage_keys_invalid");
+  for(const key of keys){
+    const value=parsed.storage[key];
+    if(typeof value!=="string")throw new Error("storage_value_invalid");
+    if(key.includes(".messages.") || key.includes(".memories.")){
+      let v;try{v=JSON.parse(value);}catch{throw new Error("history_json_invalid");}
+      if(!Array.isArray(v) || v.length>250000)throw new Error("history_shape_invalid");
+      if(v.some(item=>!item || typeof item!=="object" || Array.isArray(item)))throw new Error("history_entry_invalid");
+    }
+    if(key.includes(".avatar.") && value && !localBackupSafeImageDataUrl(value))throw new Error("avatar_invalid");
+  }
+  if(!Array.isArray(parsed.media) || parsed.media.length>3000)throw new Error("media_list_invalid");
+  const mediaIds=new Set();
+  for(const item of parsed.media){
+    if(!item||typeof item!=="object"||Array.isArray(item)||typeof item.id!=="string"||!item.id||
+       item.id.length>160||mediaIds.has(item.id) || typeof item.conversationId!=="string"||item.conversationId.length>160 ||
+       !localBackupSafeImageDataUrl(item.dataUrl))throw new Error("media_entry_invalid");
+    if(!Number.isFinite(Number(item.width))||!Number.isFinite(Number(item.height)))throw new Error("media_dimensions_invalid");
+    mediaIds.add(item.id);
+  }
+  const counts=localBackupStats(parsed.storage,parsed.media);
+  return {parsed,counts};
+}
+async function selectLocalBackupFile(file){
+  if(!file)return;
+  if(file.size>LOCAL_BACKUP_MAX_FILE_BYTES){showToast("ファイルが大きすぎます",4500);return;}
+  try{
+    const content=await file.text();
+    const parsed=JSON.parse(content);
+    const checked=validateLocalBackup(parsed);
+    pendingLocalRestore=checked.parsed;
+    backupRestoreSummary.textContent=`ファイル：${file.name}\n作成日時：${new Date(parsed.exportedAt).toLocaleString("ja-JP")}\nトーク：${checked.counts.messages}件（${checked.counts.conversations}トーク）\n長期記憶：${checked.counts.memories}件\n画像：${checked.counts.images}件\n\nこのiPhoneの現在の保存内容と置き換えます。`;
+    backupRestoreConsent.checked=false;
+    backupRestoreConfirm.disabled=true;
+    backupRestoreDialog.showModal();
+  }catch(error){
+    console.error("backup validation failed",error);
+    pendingLocalRestore=null;
+    showToast("正しいましろLINEのバックアップファイルではありません",5000);
+  }
+}
+async function commitLocalRestore(){
+  if(localBackupBusy || !pendingLocalRestore || !backupRestoreConsent.checked)return;
+  localBackupBusy=true;backupRestoreConfirm.disabled=true;backupRestoreCancel.disabled=true;
+  try{
+    const incoming=pendingLocalRestore;
+    const media=[];
+    // Decode and verify all image data before changing any stored data.
+    for(const raw of incoming.media){
+      const blob=localBackupDataUrlBlob(raw.dataUrl);
+      media.push({id:raw.id,conversationId:raw.conversationId,blob,
+        mime:blob.type,width:Number(raw.width||0),height:Number(raw.height||0),
+        createdAt:String(raw.createdAt||""),source:String(raw.source||"")});
+    }
+    const keys=localBackupAllowedKeys();
+    const previous=Object.create(null);
+    for(const key of keys)previous[key]=localStorage.getItem(key);
+    const previousMedia=await getAllLocalMediaRecords();
+    // IndexedDB's readwrite transaction rolls back in full if a write fails.
+    await replaceAllLocalMediaRecords(media);
+    try{
+      for(const key of keys){
+        if(Object.prototype.hasOwnProperty.call(incoming.storage,key))localStorage.setItem(key,incoming.storage[key]);
+        else localStorage.removeItem(key);
+      }
+    }catch(error){
+      // Best effort rollback for localStorage (no transactions supported), and restore IndexedDB snapshot.
+      // Clear the imported values first to reclaim quota before restoring the old entries.
+      for(const key of keys){try{localStorage.removeItem(key);}catch{}}
+      for(const key of keys){try{if(previous[key]!==null)localStorage.setItem(key,previous[key]);}catch(rollbackError){console.error("storage rollback failed",rollbackError);}}
+      try{await replaceAllLocalMediaRecords(previousMedia);}catch(rollbackError){console.error("media rollback failed",rollbackError);}
+      throw error;
+    }
+    // Remove pending reply/notification queues tied to the previous history.
+    // Keep existing access credentials, Push subscription identity and preferences.
+    for(const runtimeKey of [DELAYED_DM_STATE_KEY,DELAYED_GROUP_STATE_KEY,
+      PUSH_SEEN_QUEUE_KEY,PUSH_SEEN_CONVERSATION_QUEUE_KEY,AWAY_STATE_KEY,CONVERSATION_REST_KEY]){
+      localStorage.removeItem(runtimeKey);
+    }
+    pendingLocalRestore=null;
+    backupRestoreDialog.close();
+    restoreLocalBackupStatus("復元が完了しました。画面を再読み込みします。接続コードとPush通知の登録は元の端末のものを維持します。");
+    // Reload rather than using stale in-memory conversation state.
+    location.reload();
+  }catch(error){
+    console.error("local restore failed",error);
+    showToast("復元に失敗しました。現在のデータを確認してください",5000);
+  }finally{
+    localBackupBusy=false;backupRestoreCancel.disabled=false;
+    backupRestoreConfirm.disabled=!backupRestoreConsent.checked;
+  }
+}
+function buildLocalBackupSettingsSection(){
+  const section=document.createElement("section");section.className="settings-section";
+  const heading=document.createElement("h3");heading.className="settings-section-title";heading.textContent="データのバックアップ・復元";
+  const card=document.createElement("div");card.className="backup-card";
+  const description=document.createElement("p");description.className="backup-description";
+  description.textContent="この端末のトーク全件・長期記憶・表示名とアイコン・保存済み写真をJSONにまとめます。Replitの本番DBやAI接続コード、Push通知の端末登録は含まれません。";
+  const buttons=document.createElement("div");buttons.className="backup-buttons";
+  const prepare=document.createElement("button");prepare.id="prepareLocalBackupButton";prepare.type="button";prepare.className="backup-button primary";prepare.textContent="① バックアップを作成";prepare.disabled=localBackupBusy;
+  prepare.addEventListener("click",prepareLocalBackup);
+  const save=document.createElement("button");save.id="saveLocalBackupButton";save.type="button";save.className="backup-button";save.textContent="② バックアップを保存・共有";save.disabled=!preparedLocalBackup;
+  save.addEventListener("click",savePreparedLocalBackup);
+  const restore=document.createElement("button");restore.type="button";restore.className="backup-button";restore.textContent="バックアップから復元";restore.addEventListener("click",()=>{if(!localBackupBusy)backupImportInput.click();});
+  buttons.append(prepare,save,restore);
+  const status=document.createElement("p");status.id="localBackupStatus";status.className="backup-status";status.textContent=localBackupStatusText;
+  const warning=document.createElement("p");warning.className="backup-warning";warning.textContent="重要：バックアップは作成しただけでは保存されません。「保存・共有」で「ファイルに保存」などを選び、ファイルが存在することを確認してください。アプリ削除やサイトデータ消去はその後に行ってください。";
+  card.append(description,buttons,status,warning);section.append(heading,card);return section;
+}
+
 function renderSettingsScreen(){
   settingsContent.replaceChildren();
   const addSection=(title,rows)=>{
@@ -3418,6 +3724,7 @@ function renderSettingsScreen(){
     createSettingsRow({type:"self",id:"mashiro",name:getSelfDisplayName(),subtitle:SELF_PROFILE.fullName})
   ]);
 
+  settingsContent.appendChild(buildLocalBackupSettingsSection());
   settingsContent.appendChild(buildNotificationSettingsSection());
 
   addSection("キャラクター",Object.keys(CHARACTERS).map(id=>{
@@ -6310,6 +6617,11 @@ avatarButton.addEventListener("click",()=>{
   if(conversation.type==="dm")openProfileEditor("character",conversation.characterId,true);
   else openProfileEditor("group",conversation.groupId,true);
 });
+backupImportInput.addEventListener("change",async()=>{const file=backupImportInput.files?.[0];backupImportInput.value="";if(file)await selectLocalBackupFile(file);});
+backupRestoreConsent.addEventListener("change",()=>{backupRestoreConfirm.disabled=!backupRestoreConsent.checked||localBackupBusy;});
+backupRestoreCancel.addEventListener("click",()=>{if(localBackupBusy)return;pendingLocalRestore=null;backupRestoreDialog.close();});
+backupRestoreConfirm.addEventListener("click",commitLocalRestore);
+backupRestoreDialog.addEventListener("cancel",event=>{if(localBackupBusy){event.preventDefault();return;}pendingLocalRestore=null;});
 settingsButton.addEventListener("click",()=>showSettingsScreen(true));
 settingsBackButton.addEventListener("click",()=>history.back());
 profileBackButton.addEventListener("click",()=>history.back());
